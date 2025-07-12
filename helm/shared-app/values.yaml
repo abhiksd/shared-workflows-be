@@ -107,9 +107,51 @@ env:
 configMap:
   enabled: true
   data:
-    # Add your configuration here
+    # Add your custom configuration here
     LOG_LEVEL: "info"
     DEBUG: "false"
+
+# Secret configuration
+secret:
+  enabled: true
+  data: {}
+  # Database credentials
+  database:
+    username: "user"
+    password: "password"
+  # Security configuration
+  security:
+    jwtSecret: "your-jwt-secret-key-here"
+  # API Keys
+  apiKeys: {}
+  # TLS certificates
+  tls: {}
+  # Application-specific secrets
+  applicationSecrets: {}
+
+# Database configuration
+database:
+  host: "localhost"
+  port: 5432
+  name: "javaapp"
+  username: "user"
+  password: "password"
+  maxPoolSize: 10
+  showSql: false
+
+# Security configuration
+security:
+  corsEnabled: true
+  allowedOrigins: "*"
+  jwtSecret: "your-jwt-secret-key-here"
+  jwtExpirationMs: 86400000
+
+# Features configuration
+features:
+  cacheEnabled: true
+  metricsEnabled: true
+  auditEnabled: false
+  debugMode: false
 
 # Liveness probe configuration
 livenessProbe:
@@ -150,7 +192,10 @@ networkPolicy:
 
 # Monitoring and observability
 monitoring:
-  enabled: false
+  enabled: true
+  metricsPort: 8080
+  metricsPath: "/actuator/prometheus"
+  healthCheckInterval: 30
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "8080"

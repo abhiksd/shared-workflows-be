@@ -10,16 +10,65 @@ data:
   {{- range $key, $value := .Values.configMap.data }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
+  
   # Environment-specific configuration
-  environment: {{ .Values.global.environment | quote }}
-  application.name: {{ .Values.global.applicationName | quote }}
-  application.type: {{ .Values.global.applicationType | quote }}
-  # Application configuration based on type
+  ENVIRONMENT: {{ .Values.global.environment | quote }}
+  APPLICATION_NAME: {{ .Values.global.applicationName | quote }}
+  APPLICATION_TYPE: {{ .Values.global.applicationType | quote }}
+  
+  # Spring Boot specific configuration
   {{- if eq .Values.global.applicationType "java-springboot" }}
-  server.port: {{ .Values.service.port | quote }}
-  management.endpoints.web.exposure.include: "health,info,metrics,prometheus"
-  management.endpoint.health.show-details: "always"
+  SPRING_PROFILES_ACTIVE: {{ .Values.global.environment | quote }}
+  SERVER_PORT: {{ .Values.service.port | quote }}
+  
+  # Database configuration (non-sensitive)
+  DB_HOST: {{ .Values.database.host | default "localhost" | quote }}
+  DB_PORT: {{ .Values.database.port | default "5432" | quote }}
+  DB_NAME: {{ .Values.database.name | default (printf "%s_%s" .Values.global.applicationName .Values.global.environment) | quote }}
+  DB_MAX_POOL_SIZE: {{ .Values.database.maxPoolSize | default "10" | quote }}
+  DB_SHOW_SQL: {{ .Values.database.showSql | default "false" | quote }}
+  
+  # Features configuration
+  CACHE_ENABLED: {{ .Values.features.cacheEnabled | default "true" | quote }}
+  METRICS_ENABLED: {{ .Values.features.metricsEnabled | default "true" | quote }}
+  AUDIT_ENABLED: {{ .Values.features.auditEnabled | default "false" | quote }}
+  DEBUG_MODE: {{ .Values.features.debugMode | default "false" | quote }}
+  
+  # Monitoring configuration
+  MONITORING_ENABLED: {{ .Values.monitoring.enabled | default "true" | quote }}
+  METRICS_PORT: {{ .Values.monitoring.metricsPort | default "8080" | quote }}
+  METRICS_PATH: {{ .Values.monitoring.metricsPath | default "/actuator/prometheus" | quote }}
+  HEALTH_CHECK_INTERVAL: {{ .Values.monitoring.healthCheckInterval | default "30" | quote }}
+  
+  # Security configuration (non-sensitive)
+  CORS_ENABLED: {{ .Values.security.corsEnabled | default "true" | quote }}
+  ALLOWED_ORIGINS: {{ .Values.security.allowedOrigins | default "*" | quote }}
+  JWT_EXPIRATION_MS: {{ .Values.security.jwtExpirationMs | default "86400000" | quote }}
+  
+  # Build information
+  BUILD_VERSION: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+  BUILD_DATE: {{ now | date "2006-01-02T15:04:05Z07:00" | quote }}
+  
   {{- else if eq .Values.global.applicationType "nodejs" }}
+  NODE_ENV: {{ .Values.global.environment | quote }}
   PORT: {{ .Values.service.port | quote }}
+  
+  # Database configuration (non-sensitive)
+  DB_HOST: {{ .Values.database.host | default "localhost" | quote }}
+  DB_PORT: {{ .Values.database.port | default "5432" | quote }}
+  DB_NAME: {{ .Values.database.name | default (printf "%s_%s" .Values.global.applicationName .Values.global.environment) | quote }}
+  
+  # Features configuration
+  CACHE_ENABLED: {{ .Values.features.cacheEnabled | default "true" | quote }}
+  METRICS_ENABLED: {{ .Values.features.metricsEnabled | default "true" | quote }}
+  DEBUG_MODE: {{ .Values.features.debugMode | default "false" | quote }}
+  
+  # Build information
+  BUILD_VERSION: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+  BUILD_DATE: {{ now | date "2006-01-02T15:04:05Z07:00" | quote }}
   {{- end }}
+  
+  # Kubernetes information
+  POD_NAME: {{ include "shared-app.fullname" . | quote }}
+  POD_NAMESPACE: {{ .Release.Namespace | quote }}
 {{- end }}

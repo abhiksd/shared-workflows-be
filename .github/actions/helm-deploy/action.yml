@@ -95,6 +95,44 @@ runs:
             cpu: $([ "${{ inputs.environment }}" = "production" ] && echo "500m" || echo "200m")
             memory: $([ "${{ inputs.environment }}" = "production" ] && echo "1Gi" || echo "512Mi")
             
+        # Database configuration (environment-specific)
+        database:
+          host: $([ "${{ inputs.environment }}" = "production" ] && echo "prod-db.example.com" || echo "dev-db.example.com")
+          port: 5432
+          name: ${{ inputs.application_name }}_${{ inputs.environment }}
+          username: ${{ inputs.application_name }}_user
+          password: $([ "${{ inputs.environment }}" = "production" ] && echo "prod-secret-password" || echo "dev-password")
+          maxPoolSize: $([ "${{ inputs.environment }}" = "production" ] && echo "50" || echo "10")
+          showSql: $([ "${{ inputs.environment }}" = "production" ] && echo "false" || echo "true")
+          
+        # Security configuration (environment-specific)
+        security:
+          corsEnabled: true
+          allowedOrigins: $([ "${{ inputs.environment }}" = "production" ] && echo "https://api.example.com" || echo "*")
+          jwtSecret: "jwt-secret-${{ inputs.environment }}-$(date +%s)"
+          jwtExpirationMs: 86400000
+          
+        # Features configuration (environment-specific)
+        features:
+          cacheEnabled: $([ "${{ inputs.environment }}" = "production" ] && echo "true" || echo "false")
+          metricsEnabled: true
+          auditEnabled: $([ "${{ inputs.environment }}" = "production" ] && echo "true" || echo "false")
+          debugMode: $([ "${{ inputs.environment }}" = "production" ] && echo "false" || echo "true")
+          
+        # Monitoring configuration (environment-specific)
+        monitoring:
+          enabled: true
+          metricsPort: 8080
+          metricsPath: /actuator/prometheus
+          healthCheckInterval: $([ "${{ inputs.environment }}" = "production" ] && echo "60" || echo "30")
+          
+        # ConfigMap and Secret configuration
+        configMap:
+          enabled: true
+          
+        secret:
+          enabled: true
+            
         service:
           type: ClusterIP
           port: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "8080" || echo "3000")
