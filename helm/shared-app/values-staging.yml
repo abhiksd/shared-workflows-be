@@ -73,12 +73,9 @@ ingress:
   enabled: true
   className: "nginx"
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/rate-limit: "100"
     nginx.ingress.kubernetes.io/rate-limit-window: "1m"
-    cert-manager.io/cluster-issuer: "letsencrypt-staging"
     nginx.ingress.kubernetes.io/configuration-snippet: |
       more_set_headers "X-Frame-Options: DENY";
       more_set_headers "X-Content-Type-Options: nosniff";
@@ -87,10 +84,6 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
-  tls:
-    - secretName: shared-app-staging-tls
-      hosts:
-        - shared-app-staging.yourdomain.com
 
 # Resource configuration (moderate for staging)
 resources:

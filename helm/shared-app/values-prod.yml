@@ -79,13 +79,10 @@ ingress:
   enabled: true
   className: "nginx"
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/rate-limit: "1000"
     nginx.ingress.kubernetes.io/rate-limit-window: "1m"
     nginx.ingress.kubernetes.io/rate-limit-burst-multiplier: "5"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/server-snippet: |
       location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
         expires 1y;
@@ -96,7 +93,6 @@ ingress:
       more_set_headers "X-Content-Type-Options: nosniff";
       more_set_headers "X-XSS-Protection: 1; mode=block";
       more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
-      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
     nginx.ingress.kubernetes.io/enable-real-ip: "true"
     nginx.ingress.kubernetes.io/real-ip-header: "X-Forwarded-For"
   hosts:
@@ -108,11 +104,6 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
-  tls:
-    - secretName: shared-app-prod-tls
-      hosts:
-        - api.yourdomain.com
-        - shared-app.yourdomain.com
 
 # Resource configuration (production-grade)
 resources:

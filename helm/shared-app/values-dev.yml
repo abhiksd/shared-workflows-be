@@ -64,18 +64,11 @@ ingress:
   className: "nginx"
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
-    cert-manager.io/cluster-issuer: "letsencrypt-staging"
   hosts:
     - host: shared-app-dev.yourdomain.com
       paths:
         - path: /
           pathType: Prefix
-  tls:
-    - secretName: shared-app-dev-tls
-      hosts:
-        - shared-app-dev.yourdomain.com
 
 # Resource configuration (minimal for development)
 resources:

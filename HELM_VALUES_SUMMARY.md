@@ -358,8 +358,12 @@ serviceMesh:
     destinationRule:
       enabled: true
       trafficPolicy:
-        tls:
-          mode: ISTIO_MUTUAL
+        connectionPool:
+          tcp:
+            maxConnections: 100
+          http:
+            http1MaxPendingRequests: 10
+            maxRequestsPerConnection: 2
 ```
 
 #### Disaster Recovery
