@@ -73,17 +73,134 @@ ingress:
   enabled: true
   className: "nginx"
   annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/rate-limit: "100"
     nginx.ingress.kubernetes.io/rate-limit-window: "1m"
     nginx.ingress.kubernetes.io/configuration-snippet: |
       more_set_headers "X-Frame-Options: DENY";
       more_set_headers "X-Content-Type-Options: nosniff";
+    nginx.ingress.kubernetes.io/server-snippet: |
+      # Advanced routing with regex patterns
+      location ~* ^/api/v1/users/([0-9]+)/?(.*)$ {
+        proxy_pass http://shared-app-users:8080/users/$1/$2;
+      }
+      location ~* ^/api/v1/orders/([0-9]+)/items/?(.*)$ {
+        proxy_pass http://shared-app-orders:8080/orders/$1/items/$2;
+      }
+      location ~* ^/api/v1/products/category/([a-zA-Z0-9-]+)/?(.*)$ {
+        proxy_pass http://shared-app-products:8080/products/category/$1/$2;
+      }
+      location ~* ^/api/v1/search/([a-zA-Z]+)/?(.*)$ {
+        proxy_pass http://shared-app-search:8080/search/$1/$2;
+      }
+      location ~* ^/api/v1/reports/([0-9]{4})/([0-9]{2})/?(.*)$ {
+        proxy_pass http://shared-app-reports:8080/reports/$1/$2/$3;
+      }
   hosts:
     - host: shared-app-staging.yourdomain.com
       paths:
+        # User service - with ID-based routing
+        - path: /api/v1/users
+          pathType: Prefix
+          serviceName: shared-app-users
+          servicePort: 8080
+        - path: /api/v1/users/[0-9]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-users
+          servicePort: 8080
+        - path: /api/v1/users/[0-9]+/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-users
+          servicePort: 8080
+        # Order service - with nested resource routing
+        - path: /api/v1/orders
+          pathType: Prefix
+          serviceName: shared-app-orders
+          servicePort: 8080
+        - path: /api/v1/orders/[0-9]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-orders
+          servicePort: 8080
+        - path: /api/v1/orders/[0-9]+/items
+          pathType: ImplementationSpecific
+          serviceName: shared-app-orders
+          servicePort: 8080
+        - path: /api/v1/orders/[0-9]+/items/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-orders
+          servicePort: 8080
+        # Product service - with category-based routing
+        - path: /api/v1/products
+          pathType: Prefix
+          serviceName: shared-app-products
+          servicePort: 8080
+        - path: /api/v1/products/category/[a-zA-Z0-9-]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-products
+          servicePort: 8080
+        - path: /api/v1/products/category/[a-zA-Z0-9-]+/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-products
+          servicePort: 8080
+        # Search service - with type-based routing
+        - path: /api/v1/search
+          pathType: Prefix
+          serviceName: shared-app-search
+          servicePort: 8080
+        - path: /api/v1/search/[a-zA-Z]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-search
+          servicePort: 8080
+        - path: /api/v1/search/[a-zA-Z]+/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-search
+          servicePort: 8080
+        # Reports service - with date-based routing
+        - path: /api/v1/reports
+          pathType: Prefix
+          serviceName: shared-app-reports
+          servicePort: 8080
+        - path: /api/v1/reports/[0-9]{4}/[0-9]{2}
+          pathType: ImplementationSpecific
+          serviceName: shared-app-reports
+          servicePort: 8080
+        - path: /api/v1/reports/[0-9]{4}/[0-9]{2}/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-reports
+          servicePort: 8080
+        # Admin panel - with role-based routing
+        - path: /admin
+          pathType: Prefix
+          serviceName: shared-app-admin
+          servicePort: 8080
+        - path: /admin/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-admin
+          servicePort: 8080
+        # Static files - with file type routing
+        - path: /static
+          pathType: Prefix
+          serviceName: shared-app-static
+          servicePort: 80
+        - path: /static/.*\.(css|js|png|jpg|jpeg|gif|ico|svg)$
+          pathType: ImplementationSpecific
+          serviceName: shared-app-static
+          servicePort: 80
+        # Health and monitoring
+        - path: /actuator
+          pathType: Prefix
+          serviceName: shared-app
+          servicePort: 8080
+        - path: /actuator/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app
+          servicePort: 8080
+        # Default fallback
         - path: /
           pathType: Prefix
+          serviceName: shared-app
+          servicePort: 8080
 
 # Resource configuration (moderate for staging)
 resources:
