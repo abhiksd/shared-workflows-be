@@ -1,0 +1,432 @@
+# =================================
+# Staging Environment Values
+# =================================
+
+# Global configuration
+global:
+  environment: staging
+  applicationName: shared-app
+  applicationType: java-springboot
+
+# Replica configuration (moderate for staging)
+replicaCount: 2
+
+# Image configuration
+image:
+  repository: myregistry.azurecr.io/shared-app
+  pullPolicy: Always
+  tag: "staging-latest"
+
+imagePullSecrets:
+  - name: acr-secret
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations:
+    azure.workload.identity/client-id: "staging-client-id"
+  name: ""
+
+# Pod annotations for staging
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/actuator/prometheus"
+  fluentd.org/include: "true"
+  fluentd.org/multiline: "true"
+
+# Staging security context (moderate security)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 3000
+  fsGroup: 2000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+
+# Ingress configuration for staging
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+  hosts:
+    - host: shared-app-staging.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: shared-app-staging-tls
+      hosts:
+        - shared-app-staging.yourdomain.com
+
+# Resource configuration (moderate for staging)
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+# Autoscaling (enabled for staging testing)
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+
+# Node selector for staging nodes
+nodeSelector:
+  kubernetes.io/arch: amd64
+  node-type: staging
+
+# Tolerations for staging nodes
+tolerations:
+  - key: "staging"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Affinity for better distribution
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - shared-app
+        topologyKey: kubernetes.io/hostname
+
+# Environment variables
+env:
+  - name: ENVIRONMENT
+    value: "staging"
+  - name: APPLICATION_NAME
+    value: "shared-app"
+  - name: JAVA_OPTS
+    value: "-Xms512m -Xmx1536m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication"
+
+# ConfigMap configuration
+configMap:
+  enabled: true
+  data:
+    # Logging configuration
+    LOG_LEVEL: "INFO"
+    ROOT_LOG_LEVEL: "WARN"
+    
+    # Staging specific features
+    DEBUG_MODE: "false"
+    STAGING_MODE: "true"
+    
+    # Performance settings for staging
+    JVM_INITIAL_HEAP: "512m"
+    JVM_MAX_HEAP: "1536m"
+    
+    # Connection pool settings
+    DB_CONNECTION_POOL_SIZE: "15"
+    DB_CONNECTION_TIMEOUT: "30000"
+    
+    # Cache configuration
+    CACHE_SIZE: "1000"
+    CACHE_TTL: "300"
+
+# Secret configuration
+secret:
+  enabled: true
+  data: {}
+
+# Database configuration
+database:
+  host: "staging-db-cluster.internal"
+  port: 5432
+  name: "shared_app_staging"
+  username: "staging_user"
+  password: "staging_password_secure_change_me"
+  maxPoolSize: 15
+  showSql: false
+
+# Security configuration (moderate for staging)
+security:
+  corsEnabled: true
+  allowedOrigins: "https://staging.yourdomain.com,https://test.yourdomain.com"
+  jwtSecret: "staging-jwt-secret-key-secure-change-me"
+  jwtExpirationMs: 43200000  # 12 hours
+
+# Features configuration (production-like)
+features:
+  cacheEnabled: true
+  metricsEnabled: true
+  auditEnabled: true
+  debugMode: false
+
+# Liveness probe configuration
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 45
+  periodSeconds: 15
+  timeoutSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+
+# Readiness probe configuration
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+# Startup probe for slow starting applications
+startupProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+# Volume mounts for staging
+volumeMounts:
+  - name: tmp-volume
+    mountPath: /tmp
+  - name: logs-volume
+    mountPath: /var/log/shared-app
+  - name: cache-volume
+    mountPath: /app/cache
+
+# Volumes
+volumes:
+  - name: tmp-volume
+    emptyDir:
+      sizeLimit: 100Mi
+  - name: logs-volume
+    emptyDir:
+      sizeLimit: 500Mi
+  - name: cache-volume
+    emptyDir:
+      sizeLimit: 200Mi
+
+# Pod disruption budget (enabled for staging)
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  maxUnavailable: 50%
+
+# Network policy (enabled for staging)
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 8080
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+      ports:
+      - protocol: TCP
+        port: 8080
+  egress:
+    - to: []
+      ports:
+      - protocol: TCP
+        port: 53
+      - protocol: UDP
+        port: 53
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: database
+      ports:
+      - protocol: TCP
+        port: 5432
+
+# Monitoring and observability
+monitoring:
+  enabled: true
+  metricsPort: 8080
+  metricsPath: "/actuator/prometheus"
+  healthCheckInterval: 30
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    path: /actuator/prometheus
+    labels:
+      app: shared-app
+      environment: staging
+
+# Tests
+tests:
+  enabled: true
+
+# Persistence for staging
+persistence:
+  enabled: true
+  storageClass: "premium-ssd"
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "premium-ssd"
+
+# Quality gates for staging
+qualityGates:
+  enabled: true
+  performanceTesting:
+    enabled: true
+    maxResponseTime: 2000ms
+    maxThroughput: 1000rps
+  securityScanning:
+    enabled: true
+    vulnerabilityThreshold: "medium"
+  loadTesting:
+    enabled: true
+    duration: "5m"
+    users: 50
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: "7d"
+  storageClass: "standard"
+
+# Logging configuration
+logging:
+  enabled: true
+  level: "INFO"
+  format: "json"
+  output: "stdout"
+  fileLogging:
+    enabled: true
+    path: "/var/log/shared-app"
+    maxSize: "100MB"
+    maxFiles: 5
+  aggregation:
+    enabled: true
+    endpoint: "fluentd.logging.svc.cluster.local:24224"
+
+# Metrics and alerting
+alerting:
+  enabled: true
+  rules:
+    - alert: HighCPUUsage
+      expr: "cpu_usage > 80"
+      for: "5m"
+      severity: "warning"
+    - alert: HighMemoryUsage
+      expr: "memory_usage > 85"
+      for: "5m"
+      severity: "warning"
+    - alert: HighErrorRate
+      expr: "error_rate > 5"
+      for: "2m"
+      severity: "critical"
+
+# Resource quotas
+resourceQuota:
+  enabled: true
+  limits:
+    cpu: "4"
+    memory: "8Gi"
+    persistentvolumeclaims: "5"
+    requests.storage: "20Gi"
+
+# Horizontal Pod Autoscaler v2
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+# Service mesh configuration (if using Istio)
+serviceMesh:
+  enabled: false
+  istio:
+    enabled: false
+    virtualService:
+      enabled: false
+    destinationRule:
+      enabled: false

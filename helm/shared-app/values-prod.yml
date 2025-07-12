@@ -1,0 +1,627 @@
+# =================================
+# Production Environment Values
+# =================================
+
+# Global configuration
+global:
+  environment: prod
+  applicationName: shared-app
+  applicationType: java-springboot
+
+# Replica configuration (high availability for production)
+replicaCount: 3
+
+# Image configuration
+image:
+  repository: myregistry.azurecr.io/shared-app
+  pullPolicy: IfNotPresent  # Use cached images in production
+  tag: "v1.0.0"  # Use specific version tags in production
+
+imagePullSecrets:
+  - name: acr-secret
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations:
+    azure.workload.identity/client-id: "production-client-id"
+    azure.workload.identity/tenant-id: "production-tenant-id"
+  name: ""
+
+# Pod annotations for production
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/actuator/prometheus"
+  fluentd.org/include: "true"
+  fluentd.org/multiline: "true"
+  backup.kubernetes.io/enabled: "true"
+  monitoring.coreos.com/scrape: "true"
+
+# Production security context (maximum security)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 3000
+  fsGroup: 2000
+  fsGroupChangePolicy: "OnRootMismatch"
+  seccompProfile:
+    type: RuntimeDefault
+  supplementalGroups: [2000]
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    service.beta.kubernetes.io/azure-pls-create: "true"
+
+# Ingress configuration for production
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-burst-multiplier: "5"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+      }
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+    nginx.ingress.kubernetes.io/enable-real-ip: "true"
+    nginx.ingress.kubernetes.io/real-ip-header: "X-Forwarded-For"
+  hosts:
+    - host: api.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: shared-app.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: shared-app-prod-tls
+      hosts:
+        - api.yourdomain.com
+        - shared-app.yourdomain.com
+
+# Resource configuration (production-grade)
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+    ephemeral-storage: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+    ephemeral-storage: 500Mi
+
+# Autoscaling (production-grade HPA)
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # 10 minutes
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 120
+      - type: Pods
+        value: 2
+        periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 120  # 2 minutes
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 4
+        periodSeconds: 60
+
+# Node selector for production nodes
+nodeSelector:
+  kubernetes.io/arch: amd64
+  node-type: production
+  workload-type: application
+
+# Tolerations for production nodes
+tolerations:
+  - key: "production"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "dedicated"
+    operator: "Equal"
+    value: "application"
+    effect: "NoSchedule"
+
+# Affinity for high availability
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - shared-app
+      topologyKey: kubernetes.io/hostname
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - shared-app
+        topologyKey: topology.kubernetes.io/zone
+
+# Environment variables
+env:
+  - name: ENVIRONMENT
+    value: "prod"
+  - name: APPLICATION_NAME
+    value: "shared-app"
+  - name: JAVA_OPTS
+    value: "-Xms1g -Xmx3g -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops"
+
+# ConfigMap configuration
+configMap:
+  enabled: true
+  data:
+    # Logging configuration
+    LOG_LEVEL: "WARN"
+    ROOT_LOG_LEVEL: "ERROR"
+    
+    # Production specific features
+    DEBUG_MODE: "false"
+    PRODUCTION_MODE: "true"
+    
+    # Performance settings for production
+    JVM_INITIAL_HEAP: "1g"
+    JVM_MAX_HEAP: "3g"
+    
+    # Connection pool settings
+    DB_CONNECTION_POOL_SIZE: "50"
+    DB_CONNECTION_TIMEOUT: "20000"
+    DB_IDLE_TIMEOUT: "300000"
+    DB_MAX_LIFETIME: "1800000"
+    
+    # Cache configuration
+    CACHE_SIZE: "10000"
+    CACHE_TTL: "600"
+    CACHE_EVICTION_POLICY: "LRU"
+    
+    # Security settings
+    SESSION_TIMEOUT: "1800"
+    CSRF_PROTECTION: "true"
+    
+    # Rate limiting
+    RATE_LIMIT_REQUESTS: "1000"
+    RATE_LIMIT_WINDOW: "60"
+
+# Secret configuration
+secret:
+  enabled: true
+  data: {}
+
+# Database configuration
+database:
+  host: "prod-db-cluster-writer.internal"
+  port: 5432
+  name: "shared_app_production"
+  username: "prod_app_user"
+  password: "prod_super_secure_password_change_me_immediately"
+  maxPoolSize: 50
+  showSql: false
+
+# Security configuration (maximum security for production)
+security:
+  corsEnabled: true
+  allowedOrigins: "https://app.yourdomain.com,https://admin.yourdomain.com"
+  jwtSecret: "prod-jwt-super-secure-secret-key-256-bits-change-me"
+  jwtExpirationMs: 3600000  # 1 hour
+
+# Features configuration (production optimized)
+features:
+  cacheEnabled: true
+  metricsEnabled: true
+  auditEnabled: true
+  debugMode: false
+
+# Liveness probe configuration
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+    scheme: HTTP
+  initialDelaySeconds: 60
+  periodSeconds: 20
+  timeoutSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+
+# Readiness probe configuration
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+    scheme: HTTP
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+# Startup probe for production applications
+startupProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+    scheme: HTTP
+  initialDelaySeconds: 45
+  periodSeconds: 15
+  timeoutSeconds: 10
+  failureThreshold: 40
+
+# Volume mounts for production
+volumeMounts:
+  - name: tmp-volume
+    mountPath: /tmp
+  - name: logs-volume
+    mountPath: /var/log/shared-app
+  - name: cache-volume
+    mountPath: /app/cache
+  - name: config-volume
+    mountPath: /app/config
+    readOnly: true
+
+# Volumes
+volumes:
+  - name: tmp-volume
+    emptyDir:
+      sizeLimit: 500Mi
+      medium: Memory
+  - name: logs-volume
+    persistentVolumeClaim:
+      claimName: shared-app-logs-pvc
+  - name: cache-volume
+    emptyDir:
+      sizeLimit: 1Gi
+      medium: Memory
+  - name: config-volume
+    configMap:
+      name: shared-app-production-config
+
+# Pod disruption budget (critical for production)
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+  maxUnavailable: 1
+
+# Network policy (strict for production)
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 8080
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+      ports:
+      - protocol: TCP
+        port: 8080
+    - from:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: shared-app
+      ports:
+      - protocol: TCP
+        port: 8080
+  egress:
+    # DNS resolution
+    - to: []
+      ports:
+      - protocol: TCP
+        port: 53
+      - protocol: UDP
+        port: 53
+    # Database access
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: database
+      ports:
+      - protocol: TCP
+        port: 5432
+    # External APIs (if needed)
+    - to: []
+      ports:
+      - protocol: TCP
+        port: 443
+      - protocol: TCP
+        port: 80
+
+# Monitoring and observability
+monitoring:
+  enabled: true
+  metricsPort: 8080
+  metricsPath: "/actuator/prometheus"
+  healthCheckInterval: 60
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    path: /actuator/prometheus
+    labels:
+      app: shared-app
+      environment: production
+      tier: backend
+  prometheusRule:
+    enabled: true
+    rules:
+      - alert: ApplicationDown
+        expr: up{job="shared-app"} == 0
+        for: 1m
+        severity: critical
+      - alert: HighResponseTime
+        expr: http_request_duration_seconds{quantile="0.95"} > 2
+        for: 5m
+        severity: warning
+
+# Tests (disabled in production)
+tests:
+  enabled: false
+
+# Persistence for production
+persistence:
+  enabled: true
+  storageClass: "premium-ssd-retain"
+  accessMode: ReadWriteOnce
+  size: 20Gi
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "premium-ssd-retain"
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+
+# Quality gates for production
+qualityGates:
+  enabled: false  # Disabled in production runtime
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 1 * * *"  # Daily at 1 AM
+  retention: "30d"
+  storageClass: "standard-retain"
+  encryption: true
+
+# Logging configuration
+logging:
+  enabled: true
+  level: "WARN"
+  format: "json"
+  output: "stdout"
+  fileLogging:
+    enabled: true
+    path: "/var/log/shared-app"
+    maxSize: "500MB"
+    maxFiles: 10
+    compression: true
+  aggregation:
+    enabled: true
+    endpoint: "fluentd.logging.svc.cluster.local:24224"
+    buffer: "1MB"
+    flush: "30s"
+
+# Metrics and alerting
+alerting:
+  enabled: true
+  rules:
+    - alert: CriticalCPUUsage
+      expr: "cpu_usage > 90"
+      for: "2m"
+      severity: "critical"
+    - alert: HighCPUUsage
+      expr: "cpu_usage > 75"
+      for: "5m"
+      severity: "warning"
+    - alert: CriticalMemoryUsage
+      expr: "memory_usage > 90"
+      for: "2m"
+      severity: "critical"
+    - alert: HighMemoryUsage
+      expr: "memory_usage > 80"
+      for: "5m"
+      severity: "warning"
+    - alert: HighErrorRate
+      expr: "error_rate > 1"
+      for: "1m"
+      severity: "critical"
+    - alert: DatabaseConnectionFailure
+      expr: "db_connections_active / db_connections_max > 0.9"
+      for: "1m"
+      severity: "critical"
+  notifications:
+    slack:
+      enabled: true
+      webhook: ""
+    email:
+      enabled: true
+      recipients: ["ops@yourdomain.com", "oncall@yourdomain.com"]
+
+# Resource quotas
+resourceQuota:
+  enabled: true
+  limits:
+    cpu: "20"
+    memory: "40Gi"
+    persistentvolumeclaims: "10"
+    requests.storage: "100Gi"
+    services: "5"
+    secrets: "10"
+
+# Vertical Pod Autoscaler
+vpa:
+  enabled: true
+  updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: shared-app
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 4
+        memory: 8Gi
+
+# Horizontal Pod Autoscaler v2
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+
+# Service mesh configuration (production Istio)
+serviceMesh:
+  enabled: true
+  istio:
+    enabled: true
+    virtualService:
+      enabled: true
+      gateways:
+        - istio-system/production-gateway
+      hosts:
+        - api.yourdomain.com
+    destinationRule:
+      enabled: true
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+        connectionPool:
+          tcp:
+            maxConnections: 100
+          http:
+            http1MaxPendingRequests: 10
+            maxRequestsPerConnection: 2
+        circuitBreaker:
+          consecutiveErrors: 3
+          interval: 30s
+          baseEjectionTime: 30s
+
+# Security policies
+securityPolicies:
+  podSecurityPolicy:
+    enabled: true
+    name: "restricted"
+  securityContext:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+  networkSecurity:
+    isolateNamespace: true
+    denyAll: true
+    allowIngress:
+      - from: "ingress-nginx"
+      - from: "monitoring"
+    allowEgress:
+      - to: "database"
+      - to: "external-apis"
+
+# Chaos engineering (for production resilience testing)
+chaosEngineering:
+  enabled: false  # Enable only during planned chaos experiments
+  litmus:
+    enabled: false
+  experiments:
+    - pod-delete
+    - container-kill
+    - network-delay
+
+# Disaster recovery
+disasterRecovery:
+  enabled: true
+  backup:
+    frequency: "daily"
+    retention: "90d"
+  replication:
+    enabled: true
+    regions: ["us-east-1", "us-west-2"]
+  rpo: "1h"  # Recovery Point Objective
+  rto: "15m"  # Recovery Time Objective

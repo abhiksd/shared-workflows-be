@@ -1,0 +1,274 @@
+# =================================
+# Development Environment Values
+# =================================
+
+# Global configuration
+global:
+  environment: dev
+  applicationName: shared-app
+  applicationType: java-springboot
+
+# Replica configuration (single replica for dev)
+replicaCount: 1
+
+# Image configuration
+image:
+  repository: myregistry.azurecr.io/shared-app
+  pullPolicy: Always
+  tag: "dev-latest"
+
+imagePullSecrets:
+  - name: acr-secret
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod annotations for development
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/actuator/prometheus"
+
+# Development security context (less restrictive)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false  # Allow writes for development
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+
+# Ingress configuration for development
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+  hosts:
+    - host: shared-app-dev.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: shared-app-dev-tls
+      hosts:
+        - shared-app-dev.yourdomain.com
+
+# Resource configuration (minimal for development)
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Autoscaling (disabled for development)
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity (not needed for single replica)
+affinity: {}
+
+# Environment variables
+env:
+  - name: ENVIRONMENT
+    value: "dev"
+  - name: APPLICATION_NAME
+    value: "shared-app"
+  - name: JAVA_OPTS
+    value: "-Xms128m -Xmx512m -XX:+UseG1GC"
+
+# ConfigMap configuration
+configMap:
+  enabled: true
+  data:
+    # Logging configuration
+    LOG_LEVEL: "DEBUG"
+    ROOT_LOG_LEVEL: "INFO"
+    
+    # Development specific features
+    DEBUG_MODE: "true"
+    DEVELOPMENT_MODE: "true"
+    
+    # Performance settings for development
+    JVM_INITIAL_HEAP: "128m"
+    JVM_MAX_HEAP: "512m"
+
+# Secret configuration
+secret:
+  enabled: true
+  data: {}
+
+# Database configuration
+database:
+  host: "dev-db.internal"
+  port: 5432
+  name: "shared_app_dev"
+  username: "dev_user"
+  password: "dev_password_change_me"
+  maxPoolSize: 5
+  showSql: true
+
+# Security configuration (relaxed for development)
+security:
+  corsEnabled: true
+  allowedOrigins: "*"
+  jwtSecret: "dev-jwt-secret-key-not-for-production"
+  jwtExpirationMs: 86400000
+
+# Features configuration (all enabled for testing)
+features:
+  cacheEnabled: false  # Disable cache to see real-time changes
+  metricsEnabled: true
+  auditEnabled: true
+  debugMode: true
+
+# Liveness probe configuration
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Readiness probe configuration
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Volume mounts for development
+volumeMounts:
+  - name: tmp-volume
+    mountPath: /tmp
+  - name: logs-volume
+    mountPath: /var/log/shared-app
+
+# Volumes
+volumes:
+  - name: tmp-volume
+    emptyDir: {}
+  - name: logs-volume
+    emptyDir: {}
+
+# Pod disruption budget (disabled for dev)
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 0
+
+# Network policy (disabled for development)
+networkPolicy:
+  enabled: false
+
+# Monitoring and observability
+monitoring:
+  enabled: true
+  metricsPort: 8080
+  metricsPath: "/actuator/prometheus"
+  healthCheckInterval: 10
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+
+# Tests
+tests:
+  enabled: true
+
+# Development specific configurations
+development:
+  # H2 Console for Spring Boot apps
+  h2Console:
+    enabled: true
+    path: "/h2-console"
+  
+  # Debug endpoints
+  debugEndpoints:
+    enabled: true
+    endpoints:
+      - "/actuator/env"
+      - "/actuator/configprops"
+      - "/actuator/beans"
+      - "/actuator/mappings"
+  
+  # Hot reload support
+  hotReload:
+    enabled: true
+  
+  # File watchers for development
+  fileWatcher:
+    enabled: true
+    paths:
+      - "/app/config"
+      - "/app/static"
+
+# Persistence (not needed for development)
+persistence:
+  enabled: false
+  storageClass: "default"
+  accessMode: ReadWriteOnce
+  size: 1Gi
+
+# Additional development tools
+devTools:
+  # Enable all actuator endpoints for development
+  actuator:
+    endpoints:
+      enabled: "*"
+      exposure: "web"
+    security:
+      enabled: false
+  
+  # Development profiling
+  profiling:
+    enabled: true
+    jfr:
+      enabled: true
+    
+  # Memory and CPU profiling
+  monitoring:
+    jvm: true
+    heap: true
+    threads: true

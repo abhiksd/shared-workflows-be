@@ -68,8 +68,17 @@ runs:
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
         VALUES_FILE="values-${{ inputs.environment }}.yaml"
         
-        # Create environment-specific values file
-        cat > ${VALUES_FILE} << EOF
+        # Check if environment-specific values file exists
+        ENV_VALUES_FILE="${{ inputs.helm_chart_path }}/values-${{ inputs.environment }}.yml"
+        BASE_VALUES_FILE="${{ inputs.helm_chart_path }}/values.yaml"
+        
+        if [[ -f "${ENV_VALUES_FILE}" ]]; then
+          echo "Using environment-specific values file: ${ENV_VALUES_FILE}"
+          VALUES_FILE="${ENV_VALUES_FILE}"
+        else
+          echo "Environment-specific values file not found, creating dynamic values file"
+          # Create environment-specific values file
+          cat > ${VALUES_FILE} << EOF
         # Environment-specific values for ${{ inputs.environment }}
         global:
           environment: ${{ inputs.environment }}
@@ -202,15 +211,30 @@ runs:
           enabled: $([ "${{ inputs.environment }}" = "production" ] && echo "true" || echo "false")
           minAvailable: $([ "${{ inputs.environment }}" = "production" ] && echo "1" || echo "0")
         EOF
+        fi
         
         echo "values_file=${VALUES_FILE}" >> $GITHUB_OUTPUT
-        echo "Generated values file: ${VALUES_FILE}"
-        cat ${VALUES_FILE}
+        echo "Using values file: ${VALUES_FILE}"
+        
+        # Display values file content for debugging
+        if [[ -f "${VALUES_FILE}" ]]; then
+          echo "Values file content:"
+          cat ${VALUES_FILE}
+        else
+          echo "Warning: Values file ${VALUES_FILE} not found"
+        fi
       shell: bash
 
     - name: Lint Helm chart
       run: |
-        helm lint ${{ inputs.helm_chart_path }} -f ${{ steps.values.outputs.values_file }}
+        VALUES_FILE="${{ steps.values.outputs.values_file }}"
+        if [[ -f "${VALUES_FILE}" ]]; then
+          echo "Linting with values file: ${VALUES_FILE}"
+          helm lint ${{ inputs.helm_chart_path }} -f "${VALUES_FILE}"
+        else
+          echo "Linting without values file"
+          helm lint ${{ inputs.helm_chart_path }}
+        fi
       shell: bash
 
     - name: Deploy with Helm
@@ -221,29 +245,32 @@ runs:
         
         echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE}"
         
+        # Prepare Helm command arguments
+        HELM_ARGS=(
+          --namespace ${NAMESPACE}
+          --set global.applicationName=${{ inputs.application_name }}
+          --set global.applicationType=${{ inputs.application_type }}
+          --set global.environment=${{ inputs.environment }}
+          --set image.tag=${{ inputs.image_tag }}
+          --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }}
+          --wait
+          --timeout 600s
+          --atomic
+        )
+        
+        # Add values file if it exists
+        VALUES_FILE="${{ steps.values.outputs.values_file }}"
+        if [[ -f "${VALUES_FILE}" ]]; then
+          HELM_ARGS+=(--values "${VALUES_FILE}")
+        fi
+        
         # Check if release exists
         if helm list -n ${NAMESPACE} | grep -q ${RELEASE_NAME}; then
           echo "Upgrading existing release..."
-          helm upgrade ${RELEASE_NAME} ${{ inputs.helm_chart_path }} \
-            --namespace ${NAMESPACE} \
-            --values ${{ steps.values.outputs.values_file }} \
-            --set image.tag=${{ inputs.image_tag }} \
-            --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }} \
-            --version ${{ inputs.helm_version }} \
-            --wait \
-            --timeout 600s \
-            --atomic
+          helm upgrade ${RELEASE_NAME} ${{ inputs.helm_chart_path }} "${HELM_ARGS[@]}"
         else
           echo "Installing new release..."
-          helm install ${RELEASE_NAME} ${{ inputs.helm_chart_path }} \
-            --namespace ${NAMESPACE} \
-            --values ${{ steps.values.outputs.values_file }} \
-            --set image.tag=${{ inputs.image_tag }} \
-            --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }} \
-            --version ${{ inputs.helm_version }} \
-            --wait \
-            --timeout 600s \
-            --atomic
+          helm install ${RELEASE_NAME} ${{ inputs.helm_chart_path }} "${HELM_ARGS[@]}"
         fi
         
         echo "release_name=${RELEASE_NAME}" >> $GITHUB_OUTPUT
