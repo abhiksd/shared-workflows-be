@@ -79,31 +79,251 @@ ingress:
   enabled: true
   className: "nginx"
   annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/rate-limit: "1000"
     nginx.ingress.kubernetes.io/rate-limit-window: "1m"
     nginx.ingress.kubernetes.io/rate-limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/enable-real-ip: "true"
+    nginx.ingress.kubernetes.io/real-ip-header: "X-Forwarded-For"
     nginx.ingress.kubernetes.io/server-snippet: |
-      location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+      # Static assets with long-term caching
+      location ~* ^/static/(css|js|img)/.*\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        proxy_pass http://shared-app-cdn:80;
         expires 1y;
         add_header Cache-Control "public, immutable";
+        add_header X-Cache-Status "HIT-STATIC";
+      }
+      
+      # API versioning with microservice routing
+      location ~* ^/api/v([0-9]+)/users/([0-9]+)/?(.*)$ {
+        proxy_pass http://shared-app-users-v$1:8080/users/$2/$3;
+        add_header X-Service-Version "v$1";
+      }
+      
+      location ~* ^/api/v([0-9]+)/orders/([0-9]+)/payment/?(.*)$ {
+        proxy_pass http://shared-app-payments:8080/orders/$2/payment/$3;
+        add_header X-Service "payments";
+      }
+      
+      location ~* ^/api/v([0-9]+)/products/([a-zA-Z0-9-]+)/inventory/?(.*)$ {
+        proxy_pass http://shared-app-inventory:8080/products/$2/inventory/$3;
+        add_header X-Service "inventory";
+      }
+      
+      # Geographic routing based on country codes
+      location ~* ^/api/v([0-9]+)/geo/([A-Z]{2})/(.*)$ {
+        proxy_pass http://shared-app-geo-$2:8080/api/v$1/$3;
+        add_header X-Country "$2";
+      }
+      
+      # Time-based reporting with date validation
+      location ~* ^/api/v([0-9]+)/reports/([0-9]{4})-([0-9]{2})-([0-9]{2})/?(.*)$ {
+        proxy_pass http://shared-app-reports:8080/reports/$2/$3/$4/$5;
+        add_header X-Report-Date "$2-$3-$4";
+      }
+      
+      # Feature flag routing
+      location ~* ^/api/v([0-9]+)/features/([a-zA-Z0-9_-]+)/?(.*)$ {
+        proxy_pass http://shared-app-features:8080/features/$2/$3;
+        add_header X-Feature "$2";
+      }
+      
+      # A/B testing routing based on experiment ID
+      location ~* ^/api/v([0-9]+)/experiments/([a-zA-Z0-9_-]+)/?(.*)$ {
+        proxy_pass http://shared-app-experiments:8080/experiments/$2/$3;
+        add_header X-Experiment "$2";
       }
     nginx.ingress.kubernetes.io/configuration-snippet: |
       more_set_headers "X-Frame-Options: DENY";
       more_set_headers "X-Content-Type-Options: nosniff";
       more_set_headers "X-XSS-Protection: 1; mode=block";
       more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
-    nginx.ingress.kubernetes.io/enable-real-ip: "true"
-    nginx.ingress.kubernetes.io/real-ip-header: "X-Forwarded-For"
+      more_set_headers "X-Environment: production";
   hosts:
     - host: api.yourdomain.com
       paths:
-        - path: /
+        # API v1 routing - Users microservice
+        - path: /api/v1/users
           pathType: Prefix
+          serviceName: shared-app-users-v1
+          servicePort: 8080
+        - path: /api/v1/users/[0-9]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-users-v1
+          servicePort: 8080
+        - path: /api/v1/users/[0-9]+/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-users-v1
+          servicePort: 8080
+        
+        # API v2 routing - Users microservice (newer version)
+        - path: /api/v2/users
+          pathType: Prefix
+          serviceName: shared-app-users-v2
+          servicePort: 8080
+        - path: /api/v2/users/[0-9]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-users-v2
+          servicePort: 8080
+        - path: /api/v2/users/[0-9]+/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-users-v2
+          servicePort: 8080
+        
+        # Orders microservice with payment routing
+        - path: /api/v1/orders
+          pathType: Prefix
+          serviceName: shared-app-orders
+          servicePort: 8080
+        - path: /api/v1/orders/[0-9]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-orders
+          servicePort: 8080
+        - path: /api/v1/orders/[0-9]+/payment
+          pathType: ImplementationSpecific
+          serviceName: shared-app-payments
+          servicePort: 8080
+        - path: /api/v1/orders/[0-9]+/payment/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-payments
+          servicePort: 8080
+        
+        # Products and Inventory microservices
+        - path: /api/v1/products
+          pathType: Prefix
+          serviceName: shared-app-products
+          servicePort: 8080
+        - path: /api/v1/products/[a-zA-Z0-9-]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-products
+          servicePort: 8080
+        - path: /api/v1/products/[a-zA-Z0-9-]+/inventory
+          pathType: ImplementationSpecific
+          serviceName: shared-app-inventory
+          servicePort: 8080
+        - path: /api/v1/products/[a-zA-Z0-9-]+/inventory/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-inventory
+          servicePort: 8080
+        
+        # Geographic routing
+        - path: /api/v1/geo/[A-Z]{2}
+          pathType: ImplementationSpecific
+          serviceName: shared-app-geo
+          servicePort: 8080
+        - path: /api/v1/geo/[A-Z]{2}/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-geo
+          servicePort: 8080
+        
+        # Reporting with date-based routing
+        - path: /api/v1/reports
+          pathType: Prefix
+          serviceName: shared-app-reports
+          servicePort: 8080
+        - path: /api/v1/reports/[0-9]{4}-[0-9]{2}-[0-9]{2}
+          pathType: ImplementationSpecific
+          serviceName: shared-app-reports
+          servicePort: 8080
+        - path: /api/v1/reports/[0-9]{4}-[0-9]{2}-[0-9]{2}/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-reports
+          servicePort: 8080
+        
+        # Feature flags and experiments
+        - path: /api/v1/features
+          pathType: Prefix
+          serviceName: shared-app-features
+          servicePort: 8080
+        - path: /api/v1/features/[a-zA-Z0-9_-]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-features
+          servicePort: 8080
+        - path: /api/v1/experiments
+          pathType: Prefix
+          serviceName: shared-app-experiments
+          servicePort: 8080
+        - path: /api/v1/experiments/[a-zA-Z0-9_-]+
+          pathType: ImplementationSpecific
+          serviceName: shared-app-experiments
+          servicePort: 8080
+        
+        # Search and analytics
+        - path: /api/v1/search
+          pathType: Prefix
+          serviceName: shared-app-search
+          servicePort: 8080
+        - path: /api/v1/search/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-search
+          servicePort: 8080
+        - path: /api/v1/analytics
+          pathType: Prefix
+          serviceName: shared-app-analytics
+          servicePort: 8080
+        - path: /api/v1/analytics/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-analytics
+          servicePort: 8080
+        
+        # Admin and monitoring
+        - path: /admin
+          pathType: Prefix
+          serviceName: shared-app-admin
+          servicePort: 8080
+        - path: /admin/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-admin
+          servicePort: 8080
+        
+        # Health checks and metrics
+        - path: /actuator
+          pathType: Prefix
+          serviceName: shared-app
+          servicePort: 8080
+        - path: /actuator/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app
+          servicePort: 8080
+        
+        # Default API fallback
+        - path: /api
+          pathType: Prefix
+          serviceName: shared-app
+          servicePort: 8080
+        - path: /api/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app
+          servicePort: 8080
+    
     - host: shared-app.yourdomain.com
       paths:
+        # Static assets with CDN routing
+        - path: /static
+          pathType: Prefix
+          serviceName: shared-app-cdn
+          servicePort: 80
+        - path: /static/.*\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$
+          pathType: ImplementationSpecific
+          serviceName: shared-app-cdn
+          servicePort: 80
+        
+        # Web application routes
+        - path: /app
+          pathType: Prefix
+          serviceName: shared-app-frontend
+          servicePort: 80
+        - path: /app/.*
+          pathType: ImplementationSpecific
+          serviceName: shared-app-frontend
+          servicePort: 80
+        
+        # Default web fallback
         - path: /
           pathType: Prefix
+          serviceName: shared-app-frontend
+          servicePort: 80
 
 # Resource configuration (production-grade)
 resources:
