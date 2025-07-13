@@ -56,36 +56,12 @@ service:
 ingress:
   enabled: false
   className: "nginx"
-  annotations:
-    nginx.ingress.kubernetes.io/use-regex: "true"
+  annotations: {}
   hosts:
     - host: shared-app.local
       paths:
-        # API routes
-        - path: /api/v1/.*
-          pathType: ImplementationSpecific
-          serviceName: shared-app
-          servicePort: 8080
-        # Admin routes
-        - path: /admin/.*
-          pathType: ImplementationSpecific
-          serviceName: shared-app-admin
-          servicePort: 8080
-        # Static files
-        - path: /static/.*
-          pathType: ImplementationSpecific
-          serviceName: shared-app-static
-          servicePort: 80
-        # Health checks
-        - path: /actuator/.*
-          pathType: ImplementationSpecific
-          serviceName: shared-app
-          servicePort: 8080
-        # Default fallback
         - path: /
           pathType: Prefix
-          serviceName: shared-app
-          servicePort: 8080
 
 # Resource limits and requests
 resources:
