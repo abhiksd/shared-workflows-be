@@ -35,6 +35,11 @@ on:
         required: false
         type: boolean
         default: false
+      create_release:
+        description: 'Whether to create a GitHub release after deployment'
+        required: false
+        type: boolean
+        default: false
     secrets:
       AZURE_CREDENTIALS:
         description: 'Azure Service Principal credentials'
@@ -139,8 +144,7 @@ jobs:
     needs: [setup, deploy]
     if: |
       needs.setup.outputs.should_deploy == 'true' && 
-      inputs.environment == 'production' && 
-      (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/'))
+      inputs.create_release == true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

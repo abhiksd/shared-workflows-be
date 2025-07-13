@@ -93,6 +93,7 @@ jobs:
       dockerfile_path: apps/nodejs-app/Dockerfile
       helm_chart_path: helm/nodejs-app
       force_deploy: ${{ github.event.inputs.force_deploy == 'true' }}
+      create_release: ${{ startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/') }}
     secrets:
       AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
       ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
