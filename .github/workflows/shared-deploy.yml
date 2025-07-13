@@ -35,11 +35,6 @@ on:
         required: false
         type: boolean
         default: false
-      create_release:
-        description: 'Whether to create a GitHub release after deployment'
-        required: false
-        type: boolean
-        default: false
     secrets:
       AZURE_CREDENTIALS:
         description: 'Azure Service Principal credentials'
@@ -53,24 +48,117 @@ on:
       ACR_PASSWORD:
         description: 'Azure Container Registry password'
         required: true
-      AKS_CLUSTER_NAME:
-        description: 'AKS cluster name'
-        required: true
-      AKS_RESOURCE_GROUP:
-        description: 'AKS resource group'
-        required: true
+      # Development environment secrets
+      AKS_CLUSTER_NAME_DEV:
+        description: 'AKS cluster name for development'
+        required: false
+      AKS_RESOURCE_GROUP_DEV:
+        description: 'AKS resource group for development'
+        required: false
+      # Staging environment secrets
+      AKS_CLUSTER_NAME_STAGING:
+        description: 'AKS cluster name for staging'
+        required: false
+      AKS_RESOURCE_GROUP_STAGING:
+        description: 'AKS resource group for staging'
+        required: false
+      # Production environment secrets
+      AKS_CLUSTER_NAME_PROD:
+        description: 'AKS cluster name for production'
+        required: false
+      AKS_RESOURCE_GROUP_PROD:
+        description: 'AKS resource group for production'
+        required: false
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
   
 jobs:
+  environment-check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      target_environment: ${{ steps.check.outputs.target_environment }}
+      create_release: ${{ steps.check.outputs.create_release }}
+      aks_cluster_name: ${{ steps.check.outputs.aks_cluster_name }}
+      aks_resource_group: ${{ steps.check.outputs.aks_resource_group }}
+    steps:
+      - name: Check environment conditions
+        id: check
+        run: |
+          echo "Branch: ${{ github.ref }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "Input environment: ${{ inputs.environment }}"
+          
+          SHOULD_RUN="false"
+          TARGET_ENV=""
+          CREATE_RELEASE="false"
+          AKS_CLUSTER_NAME=""
+          AKS_RESOURCE_GROUP=""
+          
+          # Development environment conditions
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.environment }}" == "dev" ]]; then
+            SHOULD_RUN="true"
+            TARGET_ENV="dev"
+            CREATE_RELEASE="false"
+            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_DEV }}"
+            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_DEV }}"
+            echo "✅ Development deployment conditions met"
+          
+          # Staging environment conditions  
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || \
+               [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.environment }}" == "staging" ]]; then
+            SHOULD_RUN="true"
+            TARGET_ENV="staging" 
+            CREATE_RELEASE="false"
+            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_STAGING }}"
+            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_STAGING }}"
+            echo "✅ Staging deployment conditions met"
+          
+          # Production environment conditions
+          elif [[ "${{ github.ref }}" == refs/heads/release/* ]] || \
+               [[ "${{ github.ref }}" == refs/tags/* ]] || \
+               [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.environment }}" == "production" ]]; then
+            SHOULD_RUN="true"
+            TARGET_ENV="production"
+            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_PROD }}"
+            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_PROD }}"
+            # Create release for release branches and tags (not manual dispatch)
+            if [[ "${{ github.ref }}" == refs/heads/release/* ]] || [[ "${{ github.ref }}" == refs/tags/* ]]; then
+              CREATE_RELEASE="true"
+            fi
+            echo "✅ Production deployment conditions met"
+          
+          else
+            echo "❌ No deployment conditions met for current branch/event"
+          fi
+          
+          echo "should_run=${SHOULD_RUN}" >> $GITHUB_OUTPUT
+          echo "target_environment=${TARGET_ENV}" >> $GITHUB_OUTPUT  
+          echo "create_release=${CREATE_RELEASE}" >> $GITHUB_OUTPUT
+          echo "aks_cluster_name=${AKS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
+          echo "aks_resource_group=${AKS_RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+          
+          echo "Final decisions:"
+          echo "  should_run: ${SHOULD_RUN}"
+          echo "  target_environment: ${TARGET_ENV}"
+          echo "  create_release: ${CREATE_RELEASE}"
+          echo "  aks_cluster_name: ${AKS_CLUSTER_NAME}"
+          echo "  aks_resource_group: ${AKS_RESOURCE_GROUP}"
+        shell: bash
+
   setup:
     runs-on: ubuntu-latest
+    needs: environment-check
+    if: needs.environment-check.outputs.should_run == 'true'
     outputs:
       version: ${{ steps.version.outputs.version }}
       image_tag: ${{ steps.version.outputs.image_tag }}
       helm_version: ${{ steps.version.outputs.helm_version }}
       should_deploy: ${{ steps.changes.outputs.should_deploy }}
+      environment: ${{ needs.environment-check.outputs.target_environment }}
+      create_release: ${{ needs.environment-check.outputs.create_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,7 +169,7 @@ jobs:
         id: version
         uses: ./.github/actions/version-strategy
         with:
-          environment: ${{ inputs.environment }}
+          environment: ${{ needs.environment-check.outputs.target_environment }}
           application_name: ${{ inputs.application_name }}
 
       - name: Check for changes
@@ -94,8 +182,10 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: setup
-    if: needs.setup.outputs.should_deploy == 'true'
+    needs: [environment-check, setup]
+    if: |
+      needs.environment-check.outputs.should_run == 'true' && 
+      needs.setup.outputs.should_deploy == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,9 +204,11 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [setup, build]
-    if: needs.setup.outputs.should_deploy == 'true'
-    environment: ${{ inputs.environment }}
+    needs: [environment-check, setup, build]
+    if: |
+      needs.environment-check.outputs.should_run == 'true' && 
+      needs.setup.outputs.should_deploy == 'true'
+    environment: ${{ needs.setup.outputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -129,22 +221,23 @@ jobs:
       - name: Deploy to AKS
         uses: ./.github/actions/helm-deploy
         with:
-          environment: ${{ inputs.environment }}
+          environment: ${{ needs.setup.outputs.environment }}
           application_name: ${{ inputs.application_name }}
           application_type: ${{ inputs.application_type }}
           helm_chart_path: ${{ inputs.helm_chart_path }}
           image_tag: ${{ needs.setup.outputs.image_tag }}
           helm_version: ${{ needs.setup.outputs.helm_version }}
           registry: ${{ env.REGISTRY }}
-          aks_cluster_name: ${{ secrets.AKS_CLUSTER_NAME }}
-          aks_resource_group: ${{ secrets.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ needs.environment-check.outputs.aks_cluster_name }}
+          aks_resource_group: ${{ needs.environment-check.outputs.aks_resource_group }}
 
   create_release:
     runs-on: ubuntu-latest
-    needs: [setup, deploy]
+    needs: [environment-check, setup, deploy]
     if: |
+      needs.environment-check.outputs.should_run == 'true' && 
       needs.setup.outputs.should_deploy == 'true' && 
-      inputs.create_release == true
+      needs.setup.outputs.create_release == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
