@@ -20,12 +20,6 @@ inputs:
   registry:
     description: 'Container registry'
     required: true
-  registry_username:
-    description: 'Registry username'
-    required: true
-  registry_password:
-    description: 'Registry password'
-    required: true
 
 outputs:
   image_digest:
@@ -43,12 +37,11 @@ runs:
       with:
         platforms: linux/amd64,linux/arm64
 
-    - name: Login to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ inputs.registry }}
-        username: ${{ inputs.registry_username }}
-        password: ${{ inputs.registry_password }}
+    - name: Login to Azure Container Registry
+      run: |
+        echo "Logging into ACR using managed identity..."
+        az acr login --name ${{ inputs.registry }}
+      shell: bash
 
     - name: Extract metadata
       id: meta
