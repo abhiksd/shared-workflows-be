@@ -67,7 +67,7 @@ networkPolicy:
 - **HPA enabled** (2-5 replicas)
 - **Network policies** for security testing
 - **Quality gates** for performance testing
-- **Service mesh support** for advanced testing
+- **Advanced network testing** capabilities
 - **Comprehensive monitoring** and alerting
 
 #### Resource Profile:
@@ -118,7 +118,7 @@ networkPolicy:
 - **Maximum security hardening**
 - **Comprehensive monitoring** with PrometheusRules
 - **Disaster recovery** configuration
-- **Service mesh** with Istio
+- **Advanced networking** and traffic management
 - **Advanced networking** and security policies
 
 #### Resource Profile:
@@ -159,7 +159,7 @@ networkPolicy:
 #### Production Features:
 - **Pod Anti-Affinity** across zones
 - **Vertical Pod Autoscaler** for resource optimization
-- **Service Mesh** with Istio for traffic management
+- **Advanced traffic management** with network policies
 - **Comprehensive alerting** rules
 - **Disaster recovery** configuration
 - **Backup and persistence** with retention policies
@@ -347,24 +347,7 @@ helm install myapp helm/shared-app \
 
 ### Production-Only Features
 
-#### Service Mesh (Istio)
-```yaml
-serviceMesh:
-  enabled: true
-  istio:
-    virtualService:
-      enabled: true
-      gateways: ["istio-system/production-gateway"]
-    destinationRule:
-      enabled: true
-      trafficPolicy:
-        connectionPool:
-          tcp:
-            maxConnections: 100
-          http:
-            http1MaxPendingRequests: 10
-            maxRequestsPerConnection: 2
-```
+
 
 #### Disaster Recovery
 ```yaml

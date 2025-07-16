@@ -549,33 +549,6 @@ hpa:
         value: 50
         periodSeconds: 60
 
-# Service mesh configuration (production Istio)
-serviceMesh:
-  enabled: true
-  istio:
-    enabled: true
-    virtualService:
-      enabled: true
-      gateways:
-        - istio-system/production-gateway
-      hosts:
-        - api.yourdomain.com
-    destinationRule:
-      enabled: true
-      trafficPolicy:
-        tls:
-          mode: ISTIO_MUTUAL
-        connectionPool:
-          tcp:
-            maxConnections: 100
-          http:
-            http1MaxPendingRequests: 10
-            maxRequestsPerConnection: 2
-        circuitBreaker:
-          consecutiveErrors: 3
-          interval: 30s
-          baseEjectionTime: 30s
-
 # Security policies
 securityPolicies:
   podSecurityPolicy:
