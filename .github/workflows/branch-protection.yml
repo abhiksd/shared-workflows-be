@@ -40,6 +40,8 @@ jobs:
                     { context: 'Dependency Vulnerability Scan' },
                     { context: 'Build & Package Application' },
                     { context: 'Security Policy Validation' },
+                    { context: 'Container Security Scan' },
+                    { context: 'Infrastructure Security Scan' },
                     { context: 'Quality Gate' }
                   ]
                 },
@@ -89,6 +91,8 @@ jobs:
                     { context: 'Dependency Vulnerability Scan' },
                     { context: 'Build & Package Application' },
                     { context: 'Security Policy Validation' },
+                    { context: 'Container Security Scan' },
+                    { context: 'Infrastructure Security Scan' },
                     { context: 'Quality Gate' }
                   ]
                 },

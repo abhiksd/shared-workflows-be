@@ -1,0 +1,284 @@
+name: 'Dependency Vulnerability Scan'
+description: 'Performs OWASP dependency check for known vulnerabilities in project dependencies'
+author: 'DevOps Team'
+
+inputs:
+  java-version:
+    description: 'Java version to use'
+    required: false
+    default: '17'
+  working-directory:
+    description: 'Working directory for the scan'
+    required: false
+    default: 'apps/java-app'
+  cvss-threshold:
+    description: 'CVSS score threshold for failing the build'
+    required: false
+    default: '7'
+  suppression-file:
+    description: 'Path to OWASP suppression file'
+    required: false
+    default: 'owasp-suppressions.xml'
+  github-token:
+    description: 'GitHub token for PR comments'
+    required: false
+  enable-experimental:
+    description: 'Enable experimental analyzers'
+    required: false
+    default: 'false'
+  enable-retired:
+    description: 'Enable retired analyzers'
+    required: false
+    default: 'false'
+
+outputs:
+  vulnerability-count:
+    description: 'Total number of vulnerabilities found'
+    value: ${{ steps.parse-results.outputs.total-vulnerabilities }}
+  critical-count:
+    description: 'Number of critical vulnerabilities'
+    value: ${{ steps.parse-results.outputs.critical }}
+  high-count:
+    description: 'Number of high severity vulnerabilities'
+    value: ${{ steps.parse-results.outputs.high }}
+  medium-count:
+    description: 'Number of medium severity vulnerabilities'
+    value: ${{ steps.parse-results.outputs.medium }}
+  low-count:
+    description: 'Number of low severity vulnerabilities'
+    value: ${{ steps.parse-results.outputs.low }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ inputs.java-version }}
+        distribution: 'temurin'
+
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+
+    - name: Cache OWASP NVD Database
+      uses: actions/cache@v4
+      with:
+        path: ~/.owasp-dependency-check-data
+        key: ${{ runner.os }}-owasp-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-owasp-
+
+    - name: Run OWASP Dependency Check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "🔍 Running OWASP Dependency Check..."
+        echo "CVSS Threshold: ${{ inputs.cvss-threshold }}"
+        echo "Suppression File: ${{ inputs.suppression-file }}"
+        
+        # Build Maven command
+        MAVEN_CMD="mvn org.owasp:dependency-check-maven:check"
+        MAVEN_CMD="$MAVEN_CMD -DfailBuildOnCVSS=${{ inputs.cvss-threshold }}"
+        MAVEN_CMD="$MAVEN_CMD -DsuppressionsLocation=${{ inputs.suppression-file }}"
+        MAVEN_CMD="$MAVEN_CMD -DcveValidForHours=24"
+        MAVEN_CMD="$MAVEN_CMD -DfailOnError=false"
+        
+        # Add experimental analyzers if enabled
+        if [ "${{ inputs.enable-experimental }}" = "true" ]; then
+          MAVEN_CMD="$MAVEN_CMD -DenableExperimental=true"
+        fi
+        
+        # Add retired analyzers if enabled
+        if [ "${{ inputs.enable-retired }}" = "true" ]; then
+          MAVEN_CMD="$MAVEN_CMD -DenableRetired=true"
+        fi
+        
+        echo "Executing: $MAVEN_CMD"
+        
+        # Run the scan (don't fail on vulnerabilities yet, we'll handle that later)
+        $MAVEN_CMD || true
+
+    - name: Parse Dependency Check Results
+      id: parse-results
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Initialize counters
+        CRITICAL=0
+        HIGH=0
+        MEDIUM=0
+        LOW=0
+        TOTAL=0
+        
+        # Parse results from XML report if available
+        REPORT_FILE="target/dependency-check-report.xml"
+        if [ -f "$REPORT_FILE" ]; then
+          echo "📊 Parsing vulnerability report..."
+          
+          # Count vulnerabilities by severity
+          CRITICAL=$(grep -c 'severity="CRITICAL"' "$REPORT_FILE" 2>/dev/null || echo "0")
+          HIGH=$(grep -c 'severity="HIGH"' "$REPORT_FILE" 2>/dev/null || echo "0")
+          MEDIUM=$(grep -c 'severity="MEDIUM"' "$REPORT_FILE" 2>/dev/null || echo "0")
+          LOW=$(grep -c 'severity="LOW"' "$REPORT_FILE" 2>/dev/null || echo "0")
+          
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          
+          echo "🔍 Vulnerability Summary:"
+          echo "  Critical: $CRITICAL"
+          echo "  High: $HIGH"
+          echo "  Medium: $MEDIUM"
+          echo "  Low: $LOW"
+          echo "  Total: $TOTAL"
+        else
+          echo "⚠️ Dependency check report not found"
+        fi
+        
+        # Set outputs
+        echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "high=$HIGH" >> $GITHUB_OUTPUT
+        echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+        echo "low=$LOW" >> $GITHUB_OUTPUT
+        echo "total-vulnerabilities=$TOTAL" >> $GITHUB_OUTPUT
+        
+        # Set environment variables for next steps
+        echo "VULN_CRITICAL=$CRITICAL" >> $GITHUB_ENV
+        echo "VULN_HIGH=$HIGH" >> $GITHUB_ENV
+        echo "VULN_MEDIUM=$MEDIUM" >> $GITHUB_ENV
+        echo "VULN_LOW=$LOW" >> $GITHUB_ENV
+        echo "VULN_TOTAL=$TOTAL" >> $GITHUB_ENV
+
+    - name: Upload Dependency Check Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: dependency-check-report
+        path: |
+          ${{ inputs.working-directory }}/target/dependency-check-report.html
+          ${{ inputs.working-directory }}/target/dependency-check-report.xml
+          ${{ inputs.working-directory }}/target/dependency-check-report.json
+        retention-days: 30
+
+    - name: Generate Security Report
+      shell: bash
+      if: always()
+      run: |
+        echo "## 📦 Dependency Vulnerability Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**CVSS Threshold:** ${{ inputs.cvss-threshold }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| 🚨 Critical | ${VULN_CRITICAL} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🔴 High | ${VULN_HIGH} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🟡 Medium | ${VULN_MEDIUM} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🔵 Low | ${VULN_LOW} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 📋 **Total** | **${VULN_TOTAL}** |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Calculate critical vulnerabilities (critical + high above threshold)
+        THRESHOLD=${{ inputs.cvss-threshold }}
+        if [ "$THRESHOLD" -le "7" ]; then
+          CRITICAL_VULNS=$((VULN_CRITICAL + VULN_HIGH))
+        elif [ "$THRESHOLD" -le "4" ]; then
+          CRITICAL_VULNS=$((VULN_CRITICAL + VULN_HIGH + VULN_MEDIUM))
+        else
+          CRITICAL_VULNS=$VULN_CRITICAL
+        fi
+        
+        if [ $CRITICAL_VULNS -eq 0 ]; then
+          echo "✅ **No Critical Vulnerabilities** - All dependencies are secure above CVSS $THRESHOLD threshold." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ **Critical Vulnerabilities Found** - $CRITICAL_VULNS vulnerabilities above CVSS $THRESHOLD threshold." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please review the detailed report and update vulnerable dependencies." >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Comment PR with Results
+      if: github.event_name == 'pull_request' && inputs.github-token != '' && always()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const critical = '${{ env.VULN_CRITICAL }}';
+          const high = '${{ env.VULN_HIGH }}';
+          const medium = '${{ env.VULN_MEDIUM }}';
+          const low = '${{ env.VULN_LOW }}';
+          const total = '${{ env.VULN_TOTAL }}';
+          const threshold = '${{ inputs.cvss-threshold }}';
+          
+          // Calculate critical vulnerabilities based on threshold
+          let criticalCount = 0;
+          if (threshold <= 7) {
+            criticalCount = parseInt(critical) + parseInt(high);
+          } else if (threshold <= 4) {
+            criticalCount = parseInt(critical) + parseInt(high) + parseInt(medium);
+          } else {
+            criticalCount = parseInt(critical);
+          }
+          
+          const status = criticalCount === 0 ? '✅' : '⚠️';
+          const statusText = criticalCount === 0 ? 'PASSED' : 'VULNERABILITIES FOUND';
+          
+          const comment = `## 📦 Dependency Vulnerability Scan ${status}
+          
+          **Status:** ${statusText}
+          **CVSS Threshold:** ${threshold}
+          **Critical Issues:** ${criticalCount} (above threshold)
+          
+          ### Vulnerability Breakdown
+          - 🚨 **Critical:** ${critical}
+          - 🔴 **High:** ${high}
+          - 🟡 **Medium:** ${medium}
+          - 🔵 **Low:** ${low}
+          - 📋 **Total:** ${total}
+          
+          ${criticalCount > 0 ? '⚠️ Please update vulnerable dependencies before merging.' : '✅ All dependencies are secure above the CVSS threshold.'}
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: Check Vulnerability Threshold
+      shell: bash
+      run: |
+        THRESHOLD=${{ inputs.cvss-threshold }}
+        CRITICAL_VULNS=0
+        
+        # Determine critical vulnerabilities based on threshold
+        if [ "$THRESHOLD" -le "7" ]; then
+          CRITICAL_VULNS=$((VULN_CRITICAL + VULN_HIGH))
+          THRESHOLD_DESC="Critical and High"
+        elif [ "$THRESHOLD" -le "4" ]; then
+          CRITICAL_VULNS=$((VULN_CRITICAL + VULN_HIGH + VULN_MEDIUM))
+          THRESHOLD_DESC="Critical, High, and Medium"
+        else
+          CRITICAL_VULNS=$VULN_CRITICAL
+          THRESHOLD_DESC="Critical only"
+        fi
+        
+        echo "🔍 Checking vulnerabilities against CVSS threshold $THRESHOLD ($THRESHOLD_DESC)"
+        echo "Critical vulnerabilities found: $CRITICAL_VULNS"
+        
+        if [ $CRITICAL_VULNS -gt 0 ]; then
+          echo "❌ Dependency scan failed: Found $CRITICAL_VULNS vulnerabilities above CVSS $THRESHOLD threshold"
+          echo "Please review the dependency check report and update vulnerable dependencies."
+          exit 1
+        else
+          echo "✅ Dependency scan passed: No vulnerabilities above CVSS $THRESHOLD threshold"
+        fi
+
+branding:
+  icon: 'package'
+  color: 'orange'

@@ -25,76 +25,28 @@ env:
   MAVEN_OPTS: '-Xmx3072m'
 
 jobs:
-  # Job 1: Unit Tests
+  # Job 1: Unit Tests with Coverage
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     outputs:
-      coverage: ${{ steps.coverage.outputs.percentage }}
+      coverage: ${{ steps.test-runner.outputs.coverage-percentage }}
+      test-result: ${{ steps.test-runner.outputs.test-result }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Run Unit Tests
-        working-directory: apps/java-app
-        run: |
-          mvn clean test -Punit-tests \
-            -Dspring.profiles.active=test \
-            -Dmaven.test.failure.ignore=false
-
-      - name: Generate Code Coverage Report
-        working-directory: apps/java-app
-        run: mvn jacoco:report
-
-      - name: Extract Coverage Percentage
-        id: coverage
-        working-directory: apps/java-app
-        run: |
-          COVERAGE=$(grep -oP 'Total.*?(\d+)%' target/site/jacoco/index.html | grep -oP '\d+' | tail -1)
-          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
-          echo "Code Coverage: $COVERAGE%"
-
-      - name: Upload Coverage Reports
-        uses: actions/upload-artifact@v4
+        id: test-runner
+        uses: ./.github/actions/test-runner
         with:
-          name: coverage-report
-          path: apps/java-app/target/site/jacoco/
-
-      - name: Comment Coverage on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const coverage = '${{ steps.coverage.outputs.percentage }}';
-            const comment = `## 📊 Code Coverage Report\n\n**Coverage:** ${coverage}%\n\n${coverage >= 80 ? '✅ Coverage meets minimum threshold (80%)' : '❌ Coverage below minimum threshold (80%)'}`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-
-      - name: Fail if Coverage Below Threshold
-        if: steps.coverage.outputs.percentage < 80
-        run: |
-          echo "❌ Code coverage (${{ steps.coverage.outputs.percentage }}%) is below the required threshold (80%)"
-          exit 1
+          test-type: 'unit'
+          java-version: ${{ env.JAVA_VERSION }}
+          coverage-threshold: '80'
+          maven-opts: ${{ env.MAVEN_OPTS }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # Job 2: Integration Tests
   integration-tests:
@@ -110,34 +62,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Run Integration Tests
-        working-directory: apps/java-app
-        run: |
-          mvn clean verify -Pintegration-tests \
-            -Dspring.profiles.active=test \
-            -Dmaven.test.failure.ignore=false
-
-      - name: Upload Integration Test Results
-        uses: actions/upload-artifact@v4
-        if: always()
+        uses: ./.github/actions/test-runner
         with:
-          name: integration-test-results
-          path: apps/java-app/target/surefire-reports/
+          test-type: 'integration'
+          java-version: ${{ env.JAVA_VERSION }}
+          maven-opts: ${{ env.MAVEN_OPTS }}
 
-  # Job 3: Regression Tests
+  # Job 3: Regression Tests (Release branches only)
   regression-tests:
     name: Regression Tests
     runs-on: ubuntu-latest
@@ -147,34 +79,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Run Regression Tests
-        working-directory: apps/java-app
-        run: |
-          mvn clean test -Pregression-tests \
-            -Dspring.profiles.active=test \
-            -Dmaven.test.failure.ignore=false
-
-      - name: Upload Regression Test Results
-        uses: actions/upload-artifact@v4
-        if: always()
+        uses: ./.github/actions/test-runner
         with:
-          name: regression-test-results
-          path: apps/java-app/target/surefire-reports/
+          test-type: 'regression'
+          java-version: ${{ env.JAVA_VERSION }}
+          maven-opts: ${{ env.MAVEN_OPTS }}
 
-  # Job 4: SonarQube Analysis
+  # Job 4: SonarQube Security & Quality Scan
   sonarqube-scan:
     name: SonarQube Security & Quality Scan
     runs-on: ubuntu-latest
@@ -185,48 +97,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Cache SonarQube packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
-      - name: Download Coverage Reports
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-          path: apps/java-app/target/site/jacoco/
-
       - name: Run SonarQube Analysis
-        working-directory: apps/java-app
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          mvn clean verify sonar:sonar -Psonar \
-            -Dsonar.projectKey=${{ github.repository_owner }}_java-app \
-            -Dsonar.organization=${{ github.repository_owner }} \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.pullrequest.key=${{ github.event.number }} \
-            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
-            -Dsonar.pullrequest.base=${{ github.base_ref }}
+        uses: ./.github/actions/sonar-scan
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          java-version: ${{ env.JAVA_VERSION }}
+          pr-number: ${{ github.event.number }}
+          pr-branch: ${{ github.head_ref }}
+          pr-base: ${{ github.base_ref }}
 
-  # Job 5: Checkmarx SAST Scan
+  # Job 5: Checkmarx SAST Security Scan
   checkmarx-scan:
     name: Checkmarx Security Scan
     runs-on: ubuntu-latest
@@ -235,30 +116,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Checkmarx CxFlow Action
-        uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.6
+      - name: Run Checkmarx SAST Scan
+        uses: ./.github/actions/checkmarx-scan
         with:
-          project: ${{ github.repository }}-${{ github.ref_name }}
-          team: /CxServer/SP/Company/TeamName
-          checkmarx_url: ${{ secrets.CHECKMARX_URL }}
-          checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
-          checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
-          checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
-          scanners: sast
-          params: |
-            --namespace=${{ github.repository_owner }}
-            --repo-name=${{ github.event.repository.name }}
-            --branch=${{ github.ref_name }}
-            --cx-flow.filter-severity=high,medium
-            --cx-flow.filter-category=sql_injection,xss,command_injection
-            --logging.level.com.checkmarx.flow=DEBUG
-
-      - name: Upload Checkmarx Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: checkmarx-results
-          path: ./checkmarx-results/
+          checkmarx-url: ${{ secrets.CHECKMARX_URL }}
+          checkmarx-username: ${{ secrets.CHECKMARX_USERNAME }}
+          checkmarx-password: ${{ secrets.CHECKMARX_PASSWORD }}
+          checkmarx-client-secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          enable-sca: 'true'
 
   # Job 6: Dependency Vulnerability Scan
   dependency-scan:
@@ -268,25 +134,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - name: Run OWASP Dependency Check
+        uses: ./.github/actions/dependency-scan
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Run OWASP Dependency Check
-        working-directory: apps/java-app
-        run: |
-          mvn org.owasp:dependency-check-maven:check \
-            -DfailBuildOnCVSS=7 \
-            -DsuppressionsLocation=owasp-suppressions.xml
-
-      - name: Upload Dependency Check Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: dependency-check-report
-          path: apps/java-app/target/dependency-check-report.html
+          cvss-threshold: '7'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # Job 7: Build and Package
   build-package:
@@ -297,24 +150,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Build Application
-        working-directory: apps/java-app
+        uses: ./.github/actions/test-runner
+        with:
+          test-type: 'unit'
+          java-version: ${{ env.JAVA_VERSION }}
+          skip-tests: 'true'
+          maven-opts: ${{ env.MAVEN_OPTS }}
+
+      - name: Package Application
         run: |
-          mvn clean package -DskipTests \
-            -Dspring.profiles.active=prod
+          cd apps/java-app
+          mvn clean package -DskipTests -Dspring.profiles.active=prod
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -322,7 +169,7 @@ jobs:
           name: build-artifacts
           path: apps/java-app/target/*.jar
 
-  # Job 8: Security Policy Validation
+  # Job 8: Security Policy Validation using marketplace action
   security-validation:
     name: Security Policy Validation
     runs-on: ubuntu-latest
@@ -330,27 +177,103 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Validate Helm Security Policies
+      - name: Validate Kubernetes Security Policies
+        uses: instrumenta/conftest-action@master
+        with:
+          files: helm/shared-app/templates/*.yaml
+          policy: .github/policies/security.rego
+        continue-on-error: true
+
+      - name: Custom Security Policy Validation
         run: |
+          echo "🔒 Validating security policies..."
+          
           # Check for security contexts in Helm templates
-          find helm/ -name "*.yaml" -exec grep -l "securityContext" {} \; || {
+          if find helm/ -name "*.yaml" -exec grep -l "securityContext" {} \; | grep -q .; then
+            echo "✅ Security contexts found in Helm templates"
+          else
             echo "❌ Security contexts not found in Helm templates"
             exit 1
-          }
+          fi
           
           # Check for resource limits
-          find helm/ -name "*.yaml" -exec grep -l "limits:" {} \; || {
+          if find helm/ -name "*.yaml" -exec grep -l "limits:" {} \; | grep -q .; then
+            echo "✅ Resource limits found in Helm templates"
+          else
             echo "❌ Resource limits not found in Helm templates"
             exit 1
-          }
+          fi
+          
+          # Check for network policies
+          if find helm/ -name "*.yaml" -exec grep -l "NetworkPolicy" {} \; | grep -q .; then
+            echo "✅ Network policies configuration found"
+          else
+            echo "⚠️ Network policies not explicitly configured"
+          fi
           
           echo "✅ Security policies validation passed"
 
-  # Job 9: Final Quality Gate
+  # Job 9: Container Security Scan (using marketplace action)
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: build-package
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: apps/java-app/target/
+
+      - name: Build Docker Image
+        run: |
+          cd apps/java-app
+          docker build -t test-app:latest .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'test-app:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Job 10: Infrastructure as Code Security Scan
+  iac-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov for Terraform/Helm
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: helm/
+          framework: helm
+          soft_fail: true
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # Job 11: Final Quality Gate
   quality-gate:
     name: Quality Gate
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, sonarqube-scan, checkmarx-scan, dependency-scan, build-package, security-validation]
+    needs: [unit-tests, integration-tests, sonarqube-scan, checkmarx-scan, dependency-scan, build-package, security-validation, container-scan, iac-scan]
     if: always()
     steps:
       - name: Check Quality Gate Status
@@ -393,7 +316,72 @@ jobs:
             exit 1
           fi
           
-          echo "✅ All quality gates passed! PR is ready for merge."
+          if [[ "${{ needs.container-scan.result }}" != "success" ]]; then
+            echo "⚠️ Container scan had issues (check results)"
+          fi
+          
+          if [[ "${{ needs.iac-scan.result }}" != "success" ]]; then
+            echo "⚠️ Infrastructure scan had issues (check results)"
+          fi
+          
+          echo "✅ All critical quality gates passed! PR is ready for merge."
+
+      - name: Generate Quality Report
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const results = {
+              unitTests: '${{ needs.unit-tests.result }}',
+              integrationTests: '${{ needs.integration-tests.result }}',
+              sonarQube: '${{ needs.sonarqube-scan.result }}',
+              checkmarx: '${{ needs.checkmarx-scan.result }}',
+              dependencyScan: '${{ needs.dependency-scan.result }}',
+              buildPackage: '${{ needs.build-package.result }}',
+              securityValidation: '${{ needs.security-validation.result }}',
+              containerScan: '${{ needs.container-scan.result }}',
+              iacScan: '${{ needs.iac-scan.result }}'
+            };
+            
+            const coverage = '${{ needs.unit-tests.outputs.coverage }}' || '0';
+            
+            let status = '✅';
+            let criticalFailed = 0;
+            
+            Object.entries(results).forEach(([key, result]) => {
+              if (['unitTests', 'integrationTests', 'sonarQube', 'checkmarx', 'dependencyScan', 'buildPackage', 'securityValidation'].includes(key) && result !== 'success') {
+                status = '❌';
+                criticalFailed++;
+              }
+            });
+            
+            const comment = `## 🎯 Quality Gate Report ${status}
+            
+            **Overall Status:** ${criticalFailed === 0 ? 'PASSED' : 'FAILED'} ${criticalFailed > 0 ? `(${criticalFailed} critical failures)` : ''}
+            **Code Coverage:** ${coverage}%
+            
+            ### 📋 Check Results
+            | Check | Status |
+            |-------|--------|
+            | 🧪 Unit Tests | ${results.unitTests === 'success' ? '✅' : '❌'} |
+            | 🔗 Integration Tests | ${results.integrationTests === 'success' ? '✅' : '❌'} |
+            | 🔍 SonarQube Scan | ${results.sonarQube === 'success' ? '✅' : '❌'} |
+            | 🛡️ Checkmarx Scan | ${results.checkmarx === 'success' ? '✅' : '❌'} |
+            | 📦 Dependency Scan | ${results.dependencyScan === 'success' ? '✅' : '❌'} |
+            | 🏗️ Build & Package | ${results.buildPackage === 'success' ? '✅' : '❌'} |
+            | 🔒 Security Validation | ${results.securityValidation === 'success' ? '✅' : '❌'} |
+            | 🐳 Container Scan | ${results.containerScan === 'success' ? '✅ ' : '⚠️'} |
+            | 🏗️ Infrastructure Scan | ${results.iacScan === 'success' ? '✅' : '⚠️'} |
+            
+            ${criticalFailed === 0 ? '🎉 **All critical checks passed!** This PR is ready for review and merge.' : '🚫 **Critical checks failed.** Please address the issues before merging.'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
 
       - name: Update PR Status
         if: github.event_name == 'pull_request'
