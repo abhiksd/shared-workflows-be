@@ -1,0 +1,416 @@
+name: Pull Request Quality Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'apps/**'
+      - 'helm/**'
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  checks: write
+
+env:
+  JAVA_VERSION: '17'
+  MAVEN_OPTS: '-Xmx3072m'
+
+jobs:
+  # Job 1: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.percentage }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Run Unit Tests
+        working-directory: apps/java-app
+        run: |
+          mvn clean test -Punit-tests \
+            -Dspring.profiles.active=test \
+            -Dmaven.test.failure.ignore=false
+
+      - name: Generate Code Coverage Report
+        working-directory: apps/java-app
+        run: mvn jacoco:report
+
+      - name: Extract Coverage Percentage
+        id: coverage
+        working-directory: apps/java-app
+        run: |
+          COVERAGE=$(grep -oP 'Total.*?(\d+)%' target/site/jacoco/index.html | grep -oP '\d+' | tail -1)
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Code Coverage: $COVERAGE%"
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: apps/java-app/target/site/jacoco/
+
+      - name: Comment Coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const coverage = '${{ steps.coverage.outputs.percentage }}';
+            const comment = `## 📊 Code Coverage Report\n\n**Coverage:** ${coverage}%\n\n${coverage >= 80 ? '✅ Coverage meets minimum threshold (80%)' : '❌ Coverage below minimum threshold (80%)'}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if Coverage Below Threshold
+        if: steps.coverage.outputs.percentage < 80
+        run: |
+          echo "❌ Code coverage (${{ steps.coverage.outputs.percentage }}%) is below the required threshold (80%)"
+          exit 1
+
+  # Job 2: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      h2:
+        image: h2database/h2:latest
+        ports:
+          - 9090:9090
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Run Integration Tests
+        working-directory: apps/java-app
+        run: |
+          mvn clean verify -Pintegration-tests \
+            -Dspring.profiles.active=test \
+            -Dmaven.test.failure.ignore=false
+
+      - name: Upload Integration Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: apps/java-app/target/surefire-reports/
+
+  # Job 3: Regression Tests
+  regression-tests:
+    name: Regression Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    if: github.event_name == 'pull_request' && contains(github.head_ref, 'release/')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Run Regression Tests
+        working-directory: apps/java-app
+        run: |
+          mvn clean test -Pregression-tests \
+            -Dspring.profiles.active=test \
+            -Dmaven.test.failure.ignore=false
+
+      - name: Upload Regression Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-test-results
+          path: apps/java-app/target/surefire-reports/
+
+  # Job 4: SonarQube Analysis
+  sonarqube-scan:
+    name: SonarQube Security & Quality Scan
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache SonarQube packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Download Coverage Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: apps/java-app/target/site/jacoco/
+
+      - name: Run SonarQube Analysis
+        working-directory: apps/java-app
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          mvn clean verify sonar:sonar -Psonar \
+            -Dsonar.projectKey=${{ github.repository_owner }}_java-app \
+            -Dsonar.organization=${{ github.repository_owner }} \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.pullrequest.key=${{ github.event.number }} \
+            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+
+  # Job 5: Checkmarx SAST Scan
+  checkmarx-scan:
+    name: Checkmarx Security Scan
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkmarx CxFlow Action
+        uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.6
+        with:
+          project: ${{ github.repository }}-${{ github.ref_name }}
+          team: /CxServer/SP/Company/TeamName
+          checkmarx_url: ${{ secrets.CHECKMARX_URL }}
+          checkmarx_username: ${{ secrets.CHECKMARX_USERNAME }}
+          checkmarx_password: ${{ secrets.CHECKMARX_PASSWORD }}
+          checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+          scanners: sast
+          params: |
+            --namespace=${{ github.repository_owner }}
+            --repo-name=${{ github.event.repository.name }}
+            --branch=${{ github.ref_name }}
+            --cx-flow.filter-severity=high,medium
+            --cx-flow.filter-category=sql_injection,xss,command_injection
+            --logging.level.com.checkmarx.flow=DEBUG
+
+      - name: Upload Checkmarx Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkmarx-results
+          path: ./checkmarx-results/
+
+  # Job 6: Dependency Vulnerability Scan
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Run OWASP Dependency Check
+        working-directory: apps/java-app
+        run: |
+          mvn org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7 \
+            -DsuppressionsLocation=owasp-suppressions.xml
+
+      - name: Upload Dependency Check Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: apps/java-app/target/dependency-check-report.html
+
+  # Job 7: Build and Package
+  build-package:
+    name: Build & Package Application
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Build Application
+        working-directory: apps/java-app
+        run: |
+          mvn clean package -DskipTests \
+            -Dspring.profiles.active=prod
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: apps/java-app/target/*.jar
+
+  # Job 8: Security Policy Validation
+  security-validation:
+    name: Security Policy Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Helm Security Policies
+        run: |
+          # Check for security contexts in Helm templates
+          find helm/ -name "*.yaml" -exec grep -l "securityContext" {} \; || {
+            echo "❌ Security contexts not found in Helm templates"
+            exit 1
+          }
+          
+          # Check for resource limits
+          find helm/ -name "*.yaml" -exec grep -l "limits:" {} \; || {
+            echo "❌ Resource limits not found in Helm templates"
+            exit 1
+          }
+          
+          echo "✅ Security policies validation passed"
+
+  # Job 9: Final Quality Gate
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, sonarqube-scan, checkmarx-scan, dependency-scan, build-package, security-validation]
+    if: always()
+    steps:
+      - name: Check Quality Gate Status
+        run: |
+          echo "🔍 Checking all quality gates..."
+          
+          # Check if all required jobs passed
+          if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
+            echo "❌ Unit tests failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "❌ Integration tests failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.sonarqube-scan.result }}" != "success" ]]; then
+            echo "❌ SonarQube scan failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.checkmarx-scan.result }}" != "success" ]]; then
+            echo "❌ Checkmarx scan failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.dependency-scan.result }}" != "success" ]]; then
+            echo "❌ Dependency scan failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.build-package.result }}" != "success" ]]; then
+            echo "❌ Build and package failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.security-validation.result }}" != "success" ]]; then
+            echo "❌ Security validation failed"
+            exit 1
+          fi
+          
+          echo "✅ All quality gates passed! PR is ready for merge."
+
+      - name: Update PR Status
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            const description = status === 'success' 
+              ? '✅ All quality checks passed' 
+              : '❌ Quality checks failed';
+            
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: status,
+              target_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+              description: description,
+              context: 'Quality Gate'
+            });
