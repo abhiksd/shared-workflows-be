@@ -29,6 +29,10 @@ inputs:
   aks_resource_group:
     description: 'AKS resource group'
     required: true
+  secrets_file:
+    description: 'Path to secrets file from Key Vault'
+    required: false
+    default: ''
 
 outputs:
   deployment_status:
@@ -62,11 +66,60 @@ runs:
       shell: bash
       id: namespace
 
+    - name: Apply secrets from Key Vault
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        SECRETS_FILE="${{ inputs.secrets_file }}"
+        APP_NAME="${{ inputs.application_name }}"
+        ENVIRONMENT="${{ inputs.environment }}"
+        
+        if [ -n "$SECRETS_FILE" ] && [ -f "$SECRETS_FILE" ]; then
+          echo "🔐 Applying secrets from Key Vault..."
+          
+          # Check if secrets file has content
+          if [ -s "$SECRETS_FILE" ]; then
+            # Create Kubernetes secret from the secrets file
+            SECRET_NAME="${APP_NAME}-${ENVIRONMENT}-secrets"
+            
+            echo "  Creating Kubernetes secret: $SECRET_NAME"
+            
+            # Delete existing secret if it exists
+            kubectl delete secret "$SECRET_NAME" -n "$NAMESPACE" --ignore-not-found=true
+            
+            # Create the secret from the file
+            kubectl create secret generic "$SECRET_NAME" -n "$NAMESPACE" --from-env-file="$SECRETS_FILE"
+            
+            # Add labels for better management
+            kubectl label secret "$SECRET_NAME" -n "$NAMESPACE" \
+              app.kubernetes.io/name=${{ inputs.application_name }} \
+              app.kubernetes.io/instance=${{ inputs.application_name }}-${{ inputs.environment }} \
+              app.kubernetes.io/component=secrets \
+              app.kubernetes.io/managed-by=azure-keyvault \
+              --overwrite
+            
+            echo "  ✅ Secret created successfully"
+            
+            # Verify the secret
+            SECRET_KEYS=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data}' | jq -r 'keys[]' 2>/dev/null || echo "")
+            if [ -n "$SECRET_KEYS" ]; then
+              echo "  📋 Secret contains the following keys:"
+              echo "$SECRET_KEYS" | sed 's/^/    - /'
+            fi
+            
+          else
+            echo "  ⚠️  Secrets file is empty, skipping secret creation"
+          fi
+        else
+          echo "  ⚠️  No secrets file provided or file not found, skipping Key Vault secrets"
+        fi
+      shell: bash
+
     - name: Prepare Helm values
       id: values
       run: |
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
         VALUES_FILE="values-${{ inputs.environment }}.yaml"
+        SECRET_NAME="${{ inputs.application_name }}-${{ inputs.environment }}-secrets"
         
         # Check if environment-specific values file exists
         ENV_VALUES_FILE="${{ inputs.helm_chart_path }}/values-${{ inputs.environment }}.yml"
@@ -103,45 +156,34 @@ runs:
           requests:
             cpu: $([ "${{ inputs.environment }}" = "production" ] && echo "500m" || echo "200m")
             memory: $([ "${{ inputs.environment }}" = "production" ] && echo "1Gi" || echo "512Mi")
-            
-        # Database configuration (environment-specific)
+        
+        # Secret configuration - reference the Key Vault secrets
+        secrets:
+          enabled: true
+          existingSecret: ${SECRET_NAME}
+          
+        # Database configuration using secrets from Key Vault
         database:
-          host: $([ "${{ inputs.environment }}" = "production" ] && echo "prod-db.example.com" || echo "dev-db.example.com")
-          port: 5432
-          name: ${{ inputs.application_name }}_${{ inputs.environment }}
-          username: ${{ inputs.application_name }}_user
-          password: $([ "${{ inputs.environment }}" = "production" ] && echo "prod-secret-password" || echo "dev-password")
-          maxPoolSize: $([ "${{ inputs.environment }}" = "production" ] && echo "50" || echo "10")
-          showSql: $([ "${{ inputs.environment }}" = "production" ] && echo "false" || echo "true")
-          
-        # Security configuration (environment-specific)
-        security:
-          corsEnabled: true
-          allowedOrigins: $([ "${{ inputs.environment }}" = "production" ] && echo "https://api.example.com" || echo "*")
-          jwtSecret: "jwt-secret-${{ inputs.environment }}-$(date +%s)"
-          jwtExpirationMs: 86400000
-          
-        # Features configuration (environment-specific)
-        features:
-          cacheEnabled: $([ "${{ inputs.environment }}" = "production" ] && echo "true" || echo "false")
-          metricsEnabled: true
-          auditEnabled: $([ "${{ inputs.environment }}" = "production" ] && echo "true" || echo "false")
-          debugMode: $([ "${{ inputs.environment }}" = "production" ] && echo "false" || echo "true")
-          
-        # Monitoring configuration (environment-specific)
-        monitoring:
+          # These will be injected from the Key Vault secrets
           enabled: true
-          metricsPort: 8080
-          metricsPath: /actuator/prometheus
-          healthCheckInterval: $([ "${{ inputs.environment }}" = "production" ] && echo "60" || echo "30")
+          type: postgresql
+          # Connection details will come from environment variables
           
-        # ConfigMap and Secret configuration
-        configMap:
+        # External API configuration using secrets from Key Vault  
+        externalApis:
           enabled: true
+          # API URLs and tokens will come from environment variables
           
-        secret:
+        # Storage configuration using secrets from Key Vault
+        storage:
           enabled: true
-            
+          # Storage connection strings will come from environment variables
+          
+        # Redis configuration using secrets from Key Vault
+        redis:
+          enabled: true
+          # Redis connection strings will come from environment variables
+          
         service:
           type: ClusterIP
           port: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "8080" || echo "3000")
@@ -171,6 +213,12 @@ runs:
             value: ${{ inputs.application_name }}
           - name: BUILD_VERSION
             value: ${{ inputs.image_tag }}
+            
+        # Environment variables from Key Vault secrets
+        envFrom:
+          - secretRef:
+              name: ${SECRET_NAME}
+              optional: true
             
         # Health checks
         livenessProbe:
@@ -216,10 +264,10 @@ runs:
         echo "values_file=${VALUES_FILE}" >> $GITHUB_OUTPUT
         echo "Using values file: ${VALUES_FILE}"
         
-        # Display values file content for debugging
+        # Display values file content for debugging (excluding sensitive parts)
         if [[ -f "${VALUES_FILE}" ]]; then
-          echo "Values file content:"
-          cat ${VALUES_FILE}
+          echo "Values file content (showing structure only):"
+          grep -E "^[a-zA-Z]|^  [a-zA-Z]" ${VALUES_FILE} | head -20
         else
           echo "Warning: Values file ${VALUES_FILE} not found"
         fi
@@ -305,6 +353,7 @@ runs:
       run: |
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
         RELEASE_NAME="${{ steps.deploy.outputs.release_name }}"
+        SECRET_NAME="${{ inputs.application_name }}-${{ inputs.environment }}-secrets"
         
         cat >> $GITHUB_STEP_SUMMARY << EOF
         ## 🚀 Deployment Summary
@@ -315,6 +364,7 @@ runs:
         **Helm Chart Version:** ${{ inputs.helm_version }}
         **Namespace:** ${NAMESPACE}
         **Release Name:** ${RELEASE_NAME}
+        **Secrets:** ${SECRET_NAME}
         
         ### Deployment Status
         \`\`\`
@@ -324,6 +374,11 @@ runs:
         ### Service Information
         \`\`\`
         $(kubectl get svc -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }})
+        \`\`\`
+        
+        ### Secrets Information
+        \`\`\`
+        $(kubectl get secrets ${SECRET_NAME} -n ${NAMESPACE} --ignore-not-found=true)
         \`\`\`
         EOF
       shell: bash

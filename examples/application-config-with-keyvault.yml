@@ -1,0 +1,346 @@
+# Example Application Configuration with Azure Key Vault Integration
+# This file demonstrates how to configure your application to use secrets from Azure Key Vault
+
+# Spring Boot Application Configuration (application.yml)
+spring_boot_example: |
+  # application-dev.yml for Java Spring Boot application
+  spring:
+    datasource:
+      url: jdbc:postgresql://${JAVA_APP_DEV_DB_HOST:localhost}:${JAVA_APP_DEV_DB_PORT:5432}/${JAVA_APP_DEV_DB_NAME:java_app_dev}
+      username: ${JAVA_APP_DEV_DB_USERNAME:dev_user}
+      password: ${JAVA_APP_DEV_DB_PASSWORD:dev_password}
+      hikari:
+        maximum-pool-size: ${JAVA_APP_DEV_DB_MAX_POOL_SIZE:10}
+    
+    jpa:
+      hibernate:
+        ddl-auto: validate
+      show-sql: ${JAVA_APP_DEV_DB_SHOW_SQL:true}
+      
+    redis:
+      host: ${JAVA_APP_DEV_REDIS_HOST:localhost}
+      port: ${JAVA_APP_DEV_REDIS_PORT:6379}
+      password: ${JAVA_APP_DEV_REDIS_PASSWORD:}
+      ssl: ${JAVA_APP_DEV_REDIS_SSL:false}
+      
+  # Application-specific configuration
+  jwt:
+    secret: ${JAVA_APP_DEV_JWT_SECRET:default-jwt-secret}
+    expiration: 86400000 # 24 hours
+    
+  encryption:
+    key: ${JAVA_APP_DEV_ENCRYPTION_KEY:default-encryption-key}
+    
+  external:
+    api:
+      url: ${JAVA_APP_DEV_EXTERNAL_API_URL:https://api.example.com}
+      token: ${JAVA_APP_DEV_EXTERNAL_API_TOKEN:default-token}
+      timeout: 30000
+      
+  storage:
+    connection-string: ${JAVA_APP_DEV_STORAGE_CONNECTION_STRING:DefaultEndpointsProtocol=https;AccountName=devstorage;AccountKey=key}
+    container-name: ${JAVA_APP_DEV_STORAGE_CONTAINER:dev-container}
+    
+  monitoring:
+    application-insights:
+      instrumentation-key: ${JAVA_APP_DEV_APPINSIGHTS_KEY:dev-key}
+      
+  webhook:
+    secret: ${JAVA_APP_DEV_WEBHOOK_SECRET:default-webhook-secret}
+
+# Node.js Application Configuration
+nodejs_example: |
+  // config/config.js for Node.js application
+  module.exports = {
+    development: {
+      database: {
+        host: process.env.NODEJS_APP_DEV_DB_HOST || 'localhost',
+        port: process.env.NODEJS_APP_DEV_DB_PORT || 5432,
+        database: process.env.NODEJS_APP_DEV_DB_NAME || 'nodejs_app_dev',
+        username: process.env.NODEJS_APP_DEV_DB_USERNAME || 'dev_user',
+        password: process.env.NODEJS_APP_DEV_DB_PASSWORD || 'dev_password',
+        dialect: 'postgres',
+        pool: {
+          max: process.env.NODEJS_APP_DEV_DB_MAX_POOL_SIZE || 10,
+          min: 0,
+          acquire: 30000,
+          idle: 10000
+        }
+      },
+      
+      redis: {
+        host: process.env.NODEJS_APP_DEV_REDIS_HOST || 'localhost',
+        port: process.env.NODEJS_APP_DEV_REDIS_PORT || 6379,
+        password: process.env.NODEJS_APP_DEV_REDIS_PASSWORD,
+        db: 0
+      },
+      
+      jwt: {
+        secret: process.env.NODEJS_APP_DEV_JWT_SECRET || 'default-jwt-secret',
+        expiresIn: '24h'
+      },
+      
+      encryption: {
+        key: process.env.NODEJS_APP_DEV_ENCRYPTION_KEY || 'default-encryption-key'
+      },
+      
+      external: {
+        api: {
+          url: process.env.NODEJS_APP_DEV_EXTERNAL_API_URL || 'https://api.example.com',
+          token: process.env.NODEJS_APP_DEV_EXTERNAL_API_TOKEN || 'default-token',
+          timeout: 30000
+        }
+      },
+      
+      storage: {
+        connectionString: process.env.NODEJS_APP_DEV_STORAGE_CONNECTION_STRING,
+        containerName: process.env.NODEJS_APP_DEV_STORAGE_CONTAINER || 'dev-container'
+      },
+      
+      monitoring: {
+        applicationInsights: {
+          instrumentationKey: process.env.NODEJS_APP_DEV_APPINSIGHTS_KEY
+        }
+      },
+      
+      webhook: {
+        secret: process.env.NODEJS_APP_DEV_WEBHOOK_SECRET || 'default-webhook-secret'
+      }
+    }
+  };
+
+# Helm Chart Values Configuration
+helm_values_example: |
+  # values-dev.yaml for Helm chart
+  global:
+    environment: dev
+    applicationName: java-app
+    applicationType: java-springboot
+    
+  image:
+    repository: myregistry.azurecr.io/java-app
+    tag: latest
+    pullPolicy: Always
+    
+  replicaCount: 1
+  
+  secrets:
+    enabled: true
+    existingSecret: java-app-dev-secrets
+    
+  # Environment variables from Key Vault secrets
+  envFrom:
+    - secretRef:
+        name: java-app-dev-secrets
+        optional: true
+        
+  # Additional environment variables
+  env:
+    - name: ENVIRONMENT
+      value: dev
+    - name: APPLICATION_NAME
+      value: java-app
+    - name: LOG_LEVEL
+      value: DEBUG
+      
+  # Database configuration
+  database:
+    enabled: true
+    type: postgresql
+    # Connection details come from environment variables:
+    # JAVA_APP_DEV_DB_HOST, JAVA_APP_DEV_DB_PORT, etc.
+    
+  # External API configuration
+  externalApis:
+    enabled: true
+    # Configuration comes from environment variables:
+    # JAVA_APP_DEV_EXTERNAL_API_URL, JAVA_APP_DEV_EXTERNAL_API_TOKEN
+    
+  # Storage configuration
+  storage:
+    enabled: true
+    # Configuration comes from environment variables:
+    # JAVA_APP_DEV_STORAGE_CONNECTION_STRING
+    
+  # Redis configuration
+  redis:
+    enabled: true
+    # Configuration comes from environment variables:
+    # JAVA_APP_DEV_REDIS_CONNECTION_STRING
+    
+  service:
+    type: ClusterIP
+    port: 8080
+    
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: java-app-dev.yourdomain.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: java-app-dev-tls
+        hosts:
+          - java-app-dev.yourdomain.com
+
+# Kubernetes Deployment Template
+kubernetes_deployment_example: |
+  # deployment.yaml template
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: {{ .Values.nameOverride }}-{{ .Values.global.environment }}
+    labels:
+      app.kubernetes.io/name: {{ .Values.global.applicationName }}
+      app.kubernetes.io/instance: {{ .Values.global.applicationName }}-{{ .Values.global.environment }}
+  spec:
+    replicas: {{ .Values.replicaCount }}
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: {{ .Values.global.applicationName }}
+        app.kubernetes.io/instance: {{ .Values.global.applicationName }}-{{ .Values.global.environment }}
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: {{ .Values.global.applicationName }}
+          app.kubernetes.io/instance: {{ .Values.global.applicationName }}-{{ .Values.global.environment }}
+      spec:
+        containers:
+        - name: {{ .Values.global.applicationName }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+          - name: http
+            containerPort: {{ .Values.service.port }}
+            protocol: TCP
+          
+          # Environment variables from secrets
+          {{- if .Values.secrets.enabled }}
+          envFrom:
+          - secretRef:
+              name: {{ .Values.secrets.existingSecret }}
+              optional: true
+          {{- end }}
+          
+          # Additional environment variables
+          {{- if .Values.env }}
+          env:
+          {{- toYaml .Values.env | nindent 10 }}
+          {{- end }}
+          
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+# Docker Compose for Local Development
+docker_compose_example: |
+  # docker-compose.yml for local development
+  version: '3.8'
+  
+  services:
+    java-app:
+      build: .
+      ports:
+        - "8080:8080"
+      environment:
+        # Database configuration
+        - JAVA_APP_DEV_DB_HOST=postgres
+        - JAVA_APP_DEV_DB_PORT=5432
+        - JAVA_APP_DEV_DB_NAME=java_app_dev
+        - JAVA_APP_DEV_DB_USERNAME=dev_user
+        - JAVA_APP_DEV_DB_PASSWORD=dev_password
+        
+        # Redis configuration
+        - JAVA_APP_DEV_REDIS_HOST=redis
+        - JAVA_APP_DEV_REDIS_PORT=6379
+        
+        # Application secrets (for local development only)
+        - JAVA_APP_DEV_JWT_SECRET=local-jwt-secret-for-development
+        - JAVA_APP_DEV_ENCRYPTION_KEY=local-encryption-key-for-development
+        - JAVA_APP_DEV_API_KEY=local-api-key-for-development
+        
+        # External API configuration
+        - JAVA_APP_DEV_EXTERNAL_API_URL=https://api.example.com
+        - JAVA_APP_DEV_EXTERNAL_API_TOKEN=local-development-token
+        
+      depends_on:
+        - postgres
+        - redis
+        
+    postgres:
+      image: postgres:13
+      environment:
+        - POSTGRES_DB=java_app_dev
+        - POSTGRES_USER=dev_user
+        - POSTGRES_PASSWORD=dev_password
+      ports:
+        - "5432:5432"
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+        
+    redis:
+      image: redis:6-alpine
+      ports:
+        - "6379:6379"
+        
+  volumes:
+    postgres_data:
+
+# Environment Variables Documentation
+environment_variables_reference: |
+  # Environment Variables Reference
+  # All variables follow the pattern: {APP_NAME}_{ENVIRONMENT}_{SECRET_TYPE}
+  
+  # Database Configuration
+  JAVA_APP_DEV_DB_HOST=dev-postgres.database.azure.com
+  JAVA_APP_DEV_DB_PORT=5432
+  JAVA_APP_DEV_DB_NAME=java_app_dev
+  JAVA_APP_DEV_DB_USERNAME=java_app_user
+  JAVA_APP_DEV_DB_PASSWORD=secure-generated-password
+  JAVA_APP_DEV_DB_CONNECTION_STRING=postgresql://user:pass@host:port/db
+  JAVA_APP_DEV_DB_MAX_POOL_SIZE=10
+  JAVA_APP_DEV_DB_SHOW_SQL=false
+  
+  # Application Secrets
+  JAVA_APP_DEV_JWT_SECRET=base64-encoded-jwt-secret
+  JAVA_APP_DEV_ENCRYPTION_KEY=base64-encoded-encryption-key
+  JAVA_APP_DEV_API_KEY=application-api-key
+  
+  # External API Configuration
+  JAVA_APP_DEV_EXTERNAL_API_URL=https://api.partner.com
+  JAVA_APP_DEV_EXTERNAL_API_TOKEN=bearer-token-for-external-api
+  JAVA_APP_DEV_EXTERNAL_API_KEY=api-key-for-external-service
+  JAVA_APP_DEV_WEBHOOK_SECRET=webhook-verification-secret
+  
+  # Storage Configuration
+  JAVA_APP_DEV_STORAGE_ACCOUNT_KEY=azure-storage-account-key
+  JAVA_APP_DEV_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+  JAVA_APP_DEV_STORAGE_CONTAINER=application-files
+  
+  # Messaging Configuration
+  JAVA_APP_DEV_SERVICEBUS_CONNECTION_STRING=Endpoint=sb://...
+  JAVA_APP_DEV_REDIS_CONNECTION_STRING=redis-connection-string
+  JAVA_APP_DEV_REDIS_HOST=redis.cache.windows.net
+  JAVA_APP_DEV_REDIS_PORT=6380
+  JAVA_APP_DEV_REDIS_PASSWORD=redis-access-key
+  JAVA_APP_DEV_REDIS_SSL=true
+  
+  # Monitoring Configuration
+  JAVA_APP_DEV_APPINSIGHTS_KEY=application-insights-instrumentation-key
+  JAVA_APP_DEV_LOGGING_CONNECTION_STRING=logging-service-connection-string
+  
+  # Environment-specific Shared Secrets
+  DEV_SHARED_SECRET=shared-secret-for-dev-environment
+  DEV_COMMON_API_KEY=common-api-key-for-dev-services

@@ -47,6 +47,7 @@ jobs:
       force_deploy: ${{ github.event.inputs.force_deploy == 'true' }}
     secrets:
       ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+      KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
       # Environment-specific AKS secrets
       AKS_CLUSTER_NAME_DEV: ${{ secrets.AKS_CLUSTER_NAME_DEV }}
       AKS_RESOURCE_GROUP_DEV: ${{ secrets.AKS_RESOURCE_GROUP_DEV }}

@@ -1,0 +1,235 @@
+name: 'Azure Key Vault Secrets'
+description: 'Retrieves secrets from Azure Key Vault using managed identity'
+
+inputs:
+  keyvault_name:
+    description: 'Azure Key Vault name'
+    required: true
+  environment:
+    description: 'Target environment (dev, staging, production)'
+    required: true
+  application_name:
+    description: 'Application name'
+    required: true
+  secrets_list:
+    description: 'Comma-separated list of secret names to retrieve'
+    required: false
+    default: ''
+
+outputs:
+  secrets_retrieved:
+    description: 'Number of secrets retrieved'
+    value: ${{ steps.retrieve.outputs.secrets_count }}
+  secrets_file:
+    description: 'Path to the secrets file'
+    value: ${{ steps.retrieve.outputs.secrets_file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify Azure authentication
+      run: |
+        echo "🔐 Verifying Azure authentication..."
+        if ! az account show &> /dev/null; then
+          echo "❌ Not authenticated with Azure. Please ensure Azure login step is completed."
+          exit 1
+        fi
+        
+        USER_TYPE=$(az account show --query "user.type" -o tsv)
+        echo "✅ Authenticated with Azure (type: $USER_TYPE)"
+      shell: bash
+
+    - name: Test Key Vault access
+      run: |
+        echo "🔑 Testing Key Vault access..."
+        if az keyvault secret list --vault-name "${{ inputs.keyvault_name }}" --query "[0].name" -o tsv &> /dev/null; then
+          echo "✅ Successfully accessed Key Vault: ${{ inputs.keyvault_name }}"
+        else
+          echo "❌ Failed to access Key Vault: ${{ inputs.keyvault_name }}"
+          echo "Required permissions: Key Vault Secrets User role"
+          exit 1
+        fi
+      shell: bash
+
+    - name: Retrieve secrets from Key Vault
+      id: retrieve
+      run: |
+        echo "📥 Retrieving secrets from Key Vault..."
+        
+        KEYVAULT_NAME="${{ inputs.keyvault_name }}"
+        ENVIRONMENT="${{ inputs.environment }}"
+        APP_NAME="${{ inputs.application_name }}"
+        
+        # Create secrets directory
+        mkdir -p secrets
+        SECRETS_FILE="secrets/${APP_NAME}-${ENVIRONMENT}-secrets.env"
+        
+        # Initialize secrets count
+        SECRETS_COUNT=0
+        
+        # Define common secret patterns for the application
+        declare -a SECRET_PATTERNS=(
+          # Database secrets
+          "${APP_NAME}-${ENVIRONMENT}-db-username"
+          "${APP_NAME}-${ENVIRONMENT}-db-password" 
+          "${APP_NAME}-${ENVIRONMENT}-db-host"
+          "${APP_NAME}-${ENVIRONMENT}-db-port"
+          "${APP_NAME}-${ENVIRONMENT}-db-name"
+          "${APP_NAME}-${ENVIRONMENT}-db-connection-string"
+          
+          # Application secrets
+          "${APP_NAME}-${ENVIRONMENT}-jwt-secret"
+          "${APP_NAME}-${ENVIRONMENT}-encryption-key"
+          "${APP_NAME}-${ENVIRONMENT}-api-key"
+          
+          # Third-party integration secrets
+          "${APP_NAME}-${ENVIRONMENT}-external-api-url"
+          "${APP_NAME}-${ENVIRONMENT}-external-api-token"
+          "${APP_NAME}-${ENVIRONMENT}-external-api-key"
+          "${APP_NAME}-${ENVIRONMENT}-webhook-secret"
+          
+          # Storage secrets
+          "${APP_NAME}-${ENVIRONMENT}-storage-account-key"
+          "${APP_NAME}-${ENVIRONMENT}-storage-connection-string"
+          
+          # Messaging secrets
+          "${APP_NAME}-${ENVIRONMENT}-servicebus-connection-string"
+          "${APP_NAME}-${ENVIRONMENT}-redis-connection-string"
+          
+          # Monitoring secrets
+          "${APP_NAME}-${ENVIRONMENT}-appinsights-key"
+          "${APP_NAME}-${ENVIRONMENT}-logging-connection-string"
+          
+          # Environment-specific secrets
+          "${ENVIRONMENT}-shared-secret"
+          "${ENVIRONMENT}-common-api-key"
+        )
+        
+        # If custom secrets list provided, use it instead
+        if [ -n "${{ inputs.secrets_list }}" ]; then
+          IFS=',' read -ra SECRET_PATTERNS <<< "${{ inputs.secrets_list }}"
+        fi
+        
+        # Clear the secrets file
+        > "$SECRETS_FILE"
+        
+        echo "🔍 Searching for secrets with patterns..."
+        
+        # Retrieve each secret
+        for SECRET_NAME in "${SECRET_PATTERNS[@]}"; do
+          SECRET_NAME=$(echo "$SECRET_NAME" | xargs) # Trim whitespace
+          
+          if [ -n "$SECRET_NAME" ]; then
+            echo "  Checking: $SECRET_NAME"
+            
+            # Try to get the secret
+            if SECRET_VALUE=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$SECRET_NAME" --query "value" -o tsv 2>/dev/null); then
+              if [ -n "$SECRET_VALUE" ] && [ "$SECRET_VALUE" != "null" ]; then
+                # Convert secret name to environment variable format
+                ENV_VAR_NAME=$(echo "$SECRET_NAME" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+                
+                # Write to secrets file (base64 encode to handle special characters)
+                echo "${ENV_VAR_NAME}=$(echo "$SECRET_VALUE" | base64 -w 0)" >> "$SECRETS_FILE"
+                echo "  ✅ Retrieved: $SECRET_NAME -> $ENV_VAR_NAME"
+                ((SECRETS_COUNT++))
+              else
+                echo "  ⚠️  Empty value: $SECRET_NAME"
+              fi
+            else
+              echo "  ❌ Not found: $SECRET_NAME"
+            fi
+          fi
+        done
+        
+        echo ""
+        echo "📊 Summary:"
+        echo "  Total secrets retrieved: $SECRETS_COUNT"
+        echo "  Secrets file: $SECRETS_FILE"
+        
+        if [ $SECRETS_COUNT -eq 0 ]; then
+          echo "⚠️  No secrets found. This might be expected for a new environment."
+          # Create empty file to avoid errors in subsequent steps
+          touch "$SECRETS_FILE"
+        fi
+        
+        # Set outputs
+        echo "secrets_count=$SECRETS_COUNT" >> $GITHUB_OUTPUT
+        echo "secrets_file=$SECRETS_FILE" >> $GITHUB_OUTPUT
+        
+        # Display file size for verification (without revealing content)
+        if [ -f "$SECRETS_FILE" ]; then
+          FILE_SIZE=$(wc -c < "$SECRETS_FILE")
+          echo "  Secrets file size: $FILE_SIZE bytes"
+        fi
+      shell: bash
+
+    - name: Create Kubernetes secrets manifest
+      run: |
+        SECRETS_FILE="${{ steps.retrieve.outputs.secrets_file }}"
+        APP_NAME="${{ inputs.application_name }}"
+        ENVIRONMENT="${{ inputs.environment }}"
+        
+        if [ -f "$SECRETS_FILE" ] && [ -s "$SECRETS_FILE" ]; then
+          echo "📝 Creating Kubernetes secrets manifest..."
+          
+          K8S_SECRETS_FILE="secrets/${APP_NAME}-${ENVIRONMENT}-k8s-secrets.yaml"
+          
+          cat > "$K8S_SECRETS_FILE" << EOF
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: ${APP_NAME}-${ENVIRONMENT}-secrets
+          namespace: ${ENVIRONMENT}-${APP_NAME}
+          labels:
+            app.kubernetes.io/name: ${APP_NAME}
+            app.kubernetes.io/instance: ${APP_NAME}-${ENVIRONMENT}
+            app.kubernetes.io/component: secrets
+            app.kubernetes.io/managed-by: azure-keyvault
+        type: Opaque
+        data:
+        EOF
+          
+          # Add each secret to the manifest
+          while IFS='=' read -r key value; do
+            if [ -n "$key" ] && [ -n "$value" ]; then
+              echo "  ${key}: ${value}" >> "$K8S_SECRETS_FILE"
+            fi
+          done < "$SECRETS_FILE"
+          
+          echo "✅ Kubernetes secrets manifest created: $K8S_SECRETS_FILE"
+          
+          # Validate the YAML
+          if command -v yq &> /dev/null; then
+            if yq eval '.' "$K8S_SECRETS_FILE" > /dev/null 2>&1; then
+              echo "✅ Kubernetes secrets manifest is valid YAML"
+            else
+              echo "❌ Invalid YAML in secrets manifest"
+              exit 1
+            fi
+          fi
+        else
+          echo "⚠️  No secrets file or empty file, skipping Kubernetes manifest creation"
+        fi
+      shell: bash
+
+    - name: Upload secrets as artifact
+      uses: actions/upload-artifact@v4
+      if: steps.retrieve.outputs.secrets_count > 0
+      with:
+        name: ${{ inputs.application_name }}-${{ inputs.environment }}-secrets
+        path: secrets/
+        retention-days: 1
+
+    - name: Security cleanup
+      run: |
+        echo "🧹 Performing security cleanup..."
+        
+        # Remove any temporary files that might contain secrets
+        find . -name "*.tmp" -type f -delete 2>/dev/null || true
+        find . -name "*.temp" -type f -delete 2>/dev/null || true
+        
+        # Clear bash history to avoid leaking secrets
+        history -c 2>/dev/null || true
+        
+        echo "✅ Security cleanup completed"
+      shell: bash

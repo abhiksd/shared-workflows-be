@@ -39,6 +39,9 @@ on:
       ACR_LOGIN_SERVER:
         description: 'Azure Container Registry login server'
         required: true
+      KEYVAULT_NAME:
+        description: 'Azure Key Vault name for storing application secrets'
+        required: true
       # Development environment secrets
       AKS_CLUSTER_NAME_DEV:
         description: 'AKS cluster name for development'
@@ -212,6 +215,14 @@ jobs:
         with:
           auth-type: IDENTITY
 
+      - name: Retrieve secrets from Azure Key Vault
+        id: keyvault
+        uses: ./.github/actions/keyvault-secrets
+        with:
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          environment: ${{ needs.setup.outputs.environment }}
+          application_name: ${{ inputs.application_name }}
+
       - name: Deploy to AKS
         uses: ./.github/actions/helm-deploy
         with:
@@ -224,6 +235,7 @@ jobs:
           registry: ${{ env.REGISTRY }}
           aks_cluster_name: ${{ needs.environment-check.outputs.aks_cluster_name }}
           aks_resource_group: ${{ needs.environment-check.outputs.aks_resource_group }}
+          secrets_file: ${{ steps.keyvault.outputs.secrets_file }}
 
   create_release:
     runs-on: ubuntu-latest

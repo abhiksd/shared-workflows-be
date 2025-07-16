@@ -116,6 +116,55 @@ check_aks_permissions() {
     fi
 }
 
+# Function to check Key Vault permissions
+check_keyvault_permissions() {
+    local KEYVAULT_NAME=$1
+    
+    echo ""
+    echo "🔑 Checking Key Vault permissions for: $KEYVAULT_NAME"
+    
+    # Test Key Vault access
+    if az keyvault secret list --vault-name "$KEYVAULT_NAME" --query "[0].name" -o tsv &> /dev/null; then
+        echo "✅ Successfully accessed Key Vault: $KEYVAULT_NAME"
+        
+        # Test secret operations
+        if az keyvault secret list --vault-name "$KEYVAULT_NAME" --query "length(@)" -o tsv &> /dev/null; then
+            SECRET_COUNT=$(az keyvault secret list --vault-name "$KEYVAULT_NAME" --query "length(@)" -o tsv)
+            echo "✅ Can list secrets in Key Vault (found $SECRET_COUNT secrets)"
+        else
+            echo "⚠️  Cannot list secrets (might be empty or insufficient permissions)"
+        fi
+        
+        # Test secret read (try to read a test secret)
+        TEST_SECRET_NAME="test-access-verification-$(date +%s)"
+        if az keyvault secret set --vault-name "$KEYVAULT_NAME" --name "$TEST_SECRET_NAME" --value "test-value" &> /dev/null; then
+            echo "✅ Can create secrets in Key Vault"
+            
+            # Read the test secret
+            if TEST_VALUE=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$TEST_SECRET_NAME" --query "value" -o tsv 2>/dev/null); then
+                if [ "$TEST_VALUE" = "test-value" ]; then
+                    echo "✅ Can read secrets from Key Vault"
+                else
+                    echo "⚠️  Can create but cannot read secrets properly"
+                fi
+            else
+                echo "⚠️  Can create but cannot read secrets"
+            fi
+            
+            # Clean up test secret
+            az keyvault secret delete --vault-name "$KEYVAULT_NAME" --name "$TEST_SECRET_NAME" &> /dev/null || true
+            echo "✅ Cleaned up test secret"
+        else
+            echo "⚠️  Cannot create secrets (read-only access)"
+            echo "    This is acceptable if using a pre-populated Key Vault"
+        fi
+        
+    else
+        echo "❌ Failed to access Key Vault: $KEYVAULT_NAME"
+        echo "    Required role: Key Vault Secrets User"
+    fi
+}
+
 # Get environment variables or prompt for input
 if [ -z "$ACR_LOGIN_SERVER" ]; then
     echo ""
@@ -126,6 +175,16 @@ fi
 
 if [ -n "$ACR_NAME" ]; then
     check_acr_permissions "$ACR_NAME"
+fi
+
+# Check Key Vault access
+if [ -z "$KEYVAULT_NAME" ]; then
+    echo ""
+    read -p "Enter Key Vault name (or press Enter to skip): " KEYVAULT_NAME
+fi
+
+if [ -n "$KEYVAULT_NAME" ]; then
+    check_keyvault_permissions "$KEYVAULT_NAME"
 fi
 
 # Check AKS clusters
@@ -176,4 +235,6 @@ echo "- Ensure all ✅ checks passed"
 echo "- Address any ❌ failures before running CI/CD"
 echo "- ⚠️  warnings may be acceptable depending on your setup"
 echo ""
-echo "For more information, see MANAGED_IDENTITY_MIGRATION.md"
+echo "For more information, see:"
+echo "  - MANAGED_IDENTITY_MIGRATION.md"
+echo "  - AZURE_KEYVAULT_INTEGRATION.md"
