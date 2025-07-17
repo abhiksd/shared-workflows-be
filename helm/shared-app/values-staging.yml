@@ -414,12 +414,3 @@ hpa:
           type: Utilization
           averageUtilization: 75
 
-# Service mesh configuration (if using Istio)
-serviceMesh:
-  enabled: false
-  istio:
-    enabled: false
-    virtualService:
-      enabled: false
-    destinationRule:
-      enabled: false

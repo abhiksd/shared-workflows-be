@@ -1,0 +1,404 @@
+name: Pull Request Quality Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'apps/**'
+      - 'helm/**'
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  checks: write
+
+env:
+  JAVA_VERSION: '17'
+  MAVEN_OPTS: '-Xmx3072m'
+
+jobs:
+  # Job 1: Unit Tests with Coverage
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.test-runner.outputs.coverage-percentage }}
+      test-result: ${{ steps.test-runner.outputs.test-result }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Unit Tests
+        id: test-runner
+        uses: ./.github/actions/test-runner
+        with:
+          test-type: 'unit'
+          java-version: ${{ env.JAVA_VERSION }}
+          coverage-threshold: '80'
+          maven-opts: ${{ env.MAVEN_OPTS }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 2: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      h2:
+        image: h2database/h2:latest
+        ports:
+          - 9090:9090
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Integration Tests
+        uses: ./.github/actions/test-runner
+        with:
+          test-type: 'integration'
+          java-version: ${{ env.JAVA_VERSION }}
+          maven-opts: ${{ env.MAVEN_OPTS }}
+
+  # Job 3: Regression Tests (Release branches only)
+  regression-tests:
+    name: Regression Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    if: github.event_name == 'pull_request' && contains(github.head_ref, 'release/')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Regression Tests
+        uses: ./.github/actions/test-runner
+        with:
+          test-type: 'regression'
+          java-version: ${{ env.JAVA_VERSION }}
+          maven-opts: ${{ env.MAVEN_OPTS }}
+
+  # Job 4: SonarQube Security & Quality Scan
+  sonarqube-scan:
+    name: SonarQube Security & Quality Scan
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SonarQube Analysis
+        uses: ./.github/actions/sonar-scan
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          java-version: ${{ env.JAVA_VERSION }}
+          pr-number: ${{ github.event.number }}
+          pr-branch: ${{ github.head_ref }}
+          pr-base: ${{ github.base_ref }}
+
+  # Job 5: Checkmarx SAST Security Scan
+  checkmarx-scan:
+    name: Checkmarx Security Scan
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkmarx SAST Scan
+        uses: ./.github/actions/checkmarx-scan
+        with:
+          checkmarx-url: ${{ secrets.CHECKMARX_URL }}
+          checkmarx-username: ${{ secrets.CHECKMARX_USERNAME }}
+          checkmarx-password: ${{ secrets.CHECKMARX_PASSWORD }}
+          checkmarx-client-secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          enable-sca: 'true'
+
+  # Job 6: Dependency Vulnerability Scan
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run OWASP Dependency Check
+        uses: ./.github/actions/dependency-scan
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          cvss-threshold: '7'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 7: Build and Package
+  build-package:
+    name: Build & Package Application
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Application
+        uses: ./.github/actions/test-runner
+        with:
+          test-type: 'unit'
+          java-version: ${{ env.JAVA_VERSION }}
+          skip-tests: 'true'
+          maven-opts: ${{ env.MAVEN_OPTS }}
+
+      - name: Package Application
+        run: |
+          cd apps/java-app
+          mvn clean package -DskipTests -Dspring.profiles.active=prod
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: apps/java-app/target/*.jar
+
+  # Job 8: Security Policy Validation using marketplace action
+  security-validation:
+    name: Security Policy Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Kubernetes Security Policies
+        uses: instrumenta/conftest-action@master
+        with:
+          files: helm/shared-app/templates/*.yaml
+          policy: .github/policies/security.rego
+        continue-on-error: true
+
+      - name: Custom Security Policy Validation
+        run: |
+          echo "🔒 Validating security policies..."
+          
+          # Check for security contexts in Helm templates
+          if find helm/ -name "*.yaml" -exec grep -l "securityContext" {} \; | grep -q .; then
+            echo "✅ Security contexts found in Helm templates"
+          else
+            echo "❌ Security contexts not found in Helm templates"
+            exit 1
+          fi
+          
+          # Check for resource limits
+          if find helm/ -name "*.yaml" -exec grep -l "limits:" {} \; | grep -q .; then
+            echo "✅ Resource limits found in Helm templates"
+          else
+            echo "❌ Resource limits not found in Helm templates"
+            exit 1
+          fi
+          
+          # Check for network policies
+          if find helm/ -name "*.yaml" -exec grep -l "NetworkPolicy" {} \; | grep -q .; then
+            echo "✅ Network policies configuration found"
+          else
+            echo "⚠️ Network policies not explicitly configured"
+          fi
+          
+          echo "✅ Security policies validation passed"
+
+  # Job 9: Container Security Scan (using marketplace action)
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: build-package
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: apps/java-app/target/
+
+      - name: Build Docker Image
+        run: |
+          cd apps/java-app
+          docker build -t test-app:latest .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'test-app:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Job 10: Infrastructure as Code Security Scan
+  iac-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov for Terraform/Helm
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: helm/
+          framework: helm
+          soft_fail: true
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # Job 11: Final Quality Gate
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, sonarqube-scan, checkmarx-scan, dependency-scan, build-package, security-validation, container-scan, iac-scan]
+    if: always()
+    steps:
+      - name: Check Quality Gate Status
+        run: |
+          echo "🔍 Checking all quality gates..."
+          
+          # Check if all required jobs passed
+          if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
+            echo "❌ Unit tests failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "❌ Integration tests failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.sonarqube-scan.result }}" != "success" ]]; then
+            echo "❌ SonarQube scan failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.checkmarx-scan.result }}" != "success" ]]; then
+            echo "❌ Checkmarx scan failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.dependency-scan.result }}" != "success" ]]; then
+            echo "❌ Dependency scan failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.build-package.result }}" != "success" ]]; then
+            echo "❌ Build and package failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.security-validation.result }}" != "success" ]]; then
+            echo "❌ Security validation failed"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.container-scan.result }}" != "success" ]]; then
+            echo "⚠️ Container scan had issues (check results)"
+          fi
+          
+          if [[ "${{ needs.iac-scan.result }}" != "success" ]]; then
+            echo "⚠️ Infrastructure scan had issues (check results)"
+          fi
+          
+          echo "✅ All critical quality gates passed! PR is ready for merge."
+
+      - name: Generate Quality Report
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const results = {
+              unitTests: '${{ needs.unit-tests.result }}',
+              integrationTests: '${{ needs.integration-tests.result }}',
+              sonarQube: '${{ needs.sonarqube-scan.result }}',
+              checkmarx: '${{ needs.checkmarx-scan.result }}',
+              dependencyScan: '${{ needs.dependency-scan.result }}',
+              buildPackage: '${{ needs.build-package.result }}',
+              securityValidation: '${{ needs.security-validation.result }}',
+              containerScan: '${{ needs.container-scan.result }}',
+              iacScan: '${{ needs.iac-scan.result }}'
+            };
+            
+            const coverage = '${{ needs.unit-tests.outputs.coverage }}' || '0';
+            
+            let status = '✅';
+            let criticalFailed = 0;
+            
+            Object.entries(results).forEach(([key, result]) => {
+              if (['unitTests', 'integrationTests', 'sonarQube', 'checkmarx', 'dependencyScan', 'buildPackage', 'securityValidation'].includes(key) && result !== 'success') {
+                status = '❌';
+                criticalFailed++;
+              }
+            });
+            
+            const comment = `## 🎯 Quality Gate Report ${status}
+            
+            **Overall Status:** ${criticalFailed === 0 ? 'PASSED' : 'FAILED'} ${criticalFailed > 0 ? `(${criticalFailed} critical failures)` : ''}
+            **Code Coverage:** ${coverage}%
+            
+            ### 📋 Check Results
+            | Check | Status |
+            |-------|--------|
+            | 🧪 Unit Tests | ${results.unitTests === 'success' ? '✅' : '❌'} |
+            | 🔗 Integration Tests | ${results.integrationTests === 'success' ? '✅' : '❌'} |
+            | 🔍 SonarQube Scan | ${results.sonarQube === 'success' ? '✅' : '❌'} |
+            | 🛡️ Checkmarx Scan | ${results.checkmarx === 'success' ? '✅' : '❌'} |
+            | 📦 Dependency Scan | ${results.dependencyScan === 'success' ? '✅' : '❌'} |
+            | 🏗️ Build & Package | ${results.buildPackage === 'success' ? '✅' : '❌'} |
+            | 🔒 Security Validation | ${results.securityValidation === 'success' ? '✅' : '❌'} |
+            | 🐳 Container Scan | ${results.containerScan === 'success' ? '✅ ' : '⚠️'} |
+            | 🏗️ Infrastructure Scan | ${results.iacScan === 'success' ? '✅' : '⚠️'} |
+            
+            ${criticalFailed === 0 ? '🎉 **All critical checks passed!** This PR is ready for review and merge.' : '🚫 **Critical checks failed.** Please address the issues before merging.'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Update PR Status
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            const description = status === 'success' 
+              ? '✅ All quality checks passed' 
+              : '❌ Quality checks failed';
+            
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: status,
+              target_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+              description: description,
+              context: 'Quality Gate'
+            });

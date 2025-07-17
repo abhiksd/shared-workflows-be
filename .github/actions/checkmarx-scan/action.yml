@@ -1,0 +1,254 @@
+name: 'Checkmarx Security Scan'
+description: 'Performs Checkmarx SAST security scanning with vulnerability detection'
+author: 'DevOps Team'
+
+inputs:
+  checkmarx-url:
+    description: 'Checkmarx server URL'
+    required: true
+  checkmarx-username:
+    description: 'Checkmarx username'
+    required: true
+  checkmarx-password:
+    description: 'Checkmarx password'
+    required: true
+  checkmarx-client-secret:
+    description: 'Checkmarx OAuth client secret'
+    required: true
+  project-name:
+    description: 'Checkmarx project name'
+    required: false
+    default: ''
+  team-name:
+    description: 'Checkmarx team name'
+    required: false
+    default: '/CxServer/SP/Company/TeamName'
+  preset-name:
+    description: 'Checkmarx scan preset'
+    required: false
+    default: 'Checkmarx Default'
+  exclude-folders:
+    description: 'Folders to exclude from scan'
+    required: false
+    default: 'test,target,node_modules,.git'
+  exclude-files:
+    description: 'Files to exclude from scan'
+    required: false
+    default: '*.min.js,*.test.js'
+  high-threshold:
+    description: 'High severity threshold'
+    required: false
+    default: '0'
+  medium-threshold:
+    description: 'Medium severity threshold'
+    required: false
+    default: '0'
+  low-threshold:
+    description: 'Low severity threshold'
+    required: false
+    default: '-1'
+  working-directory:
+    description: 'Working directory for the scan'
+    required: false
+    default: '.'
+  enable-sca:
+    description: 'Enable Software Composition Analysis'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token for PR comments'
+    required: true
+
+outputs:
+  scan-id:
+    description: 'Checkmarx scan ID'
+    value: ${{ steps.cx-scan.outputs.scan-id }}
+  project-id:
+    description: 'Checkmarx project ID'
+    value: ${{ steps.cx-scan.outputs.project-id }}
+  high-severity:
+    description: 'Number of high severity vulnerabilities'
+    value: ${{ steps.cx-scan.outputs.high-severity }}
+  medium-severity:
+    description: 'Number of medium severity vulnerabilities'
+    value: ${{ steps.cx-scan.outputs.medium-severity }}
+  low-severity:
+    description: 'Number of low severity vulnerabilities'
+    value: ${{ steps.cx-scan.outputs.low-severity }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set Project Name
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.project-name }}" ]; then
+          PROJECT_NAME="${{ github.repository }}-${{ github.ref_name }}"
+        else
+          PROJECT_NAME="${{ inputs.project-name }}"
+        fi
+        echo "CX_PROJECT_NAME=$PROJECT_NAME" >> $GITHUB_ENV
+
+    - name: Checkmarx SAST Scan
+      id: cx-scan
+      uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.7
+      with:
+        project: ${{ env.CX_PROJECT_NAME }}
+        team: ${{ inputs.team-name }}
+        checkmarx_url: ${{ inputs.checkmarx-url }}
+        checkmarx_username: ${{ inputs.checkmarx-username }}
+        checkmarx_password: ${{ inputs.checkmarx-password }}
+        checkmarx_client_secret: ${{ inputs.checkmarx-client-secret }}
+        scanners: sast
+        preset: ${{ inputs.preset-name }}
+        incremental: true
+        break_build: false
+        params: |
+          --namespace=${{ github.repository_owner }}
+          --repo-name=${{ github.event.repository.name }}
+          --branch=${{ github.ref_name }}
+          --cx-flow.filter-severity=high,medium
+          --cx-flow.filter-category=sql_injection,xss,command_injection,path_traversal,xxe
+          --cx-flow.thresholds.high=${{ inputs.high-threshold }}
+          --cx-flow.thresholds.medium=${{ inputs.medium-threshold }}
+          --cx-flow.thresholds.low=${{ inputs.low-threshold }}
+          --cx-flow.exclude-files=${{ inputs.exclude-files }}
+          --cx-flow.exclude-folders=${{ inputs.exclude-folders }}
+          --logging.level.com.checkmarx.flow=INFO
+          --checkmarx.scan-comment="Automated security scan from GitHub Actions"
+
+    - name: Checkmarx SCA Scan
+      if: inputs.enable-sca == 'true'
+      uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.7
+      with:
+        project: ${{ env.CX_PROJECT_NAME }}-SCA
+        team: ${{ inputs.team-name }}
+        checkmarx_url: ${{ inputs.checkmarx-url }}
+        checkmarx_username: ${{ inputs.checkmarx-username }}
+        checkmarx_password: ${{ inputs.checkmarx-password }}
+        checkmarx_client_secret: ${{ inputs.checkmarx-client-secret }}
+        scanners: sca
+        break_build: false
+        params: |
+          --namespace=${{ github.repository_owner }}
+          --repo-name=${{ github.event.repository.name }}
+          --branch=${{ github.ref_name }}
+          --cx-flow.filter-severity=high,medium
+          --cx-flow.thresholds.high=${{ inputs.high-threshold }}
+          --cx-flow.thresholds.medium=${{ inputs.medium-threshold }}
+          --logging.level.com.checkmarx.flow=INFO
+
+    - name: Upload Checkmarx Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: checkmarx-results
+        path: |
+          ./checkmarx-results/
+          ./cx_console_output.log
+        retention-days: 30
+
+    - name: Parse Checkmarx Results
+      id: parse-results
+      shell: bash
+      if: always()
+      run: |
+        # Initialize counters
+        HIGH=0
+        MEDIUM=0
+        LOW=0
+        
+        # Parse results if available
+        if [ -f "./checkmarx-results/results.xml" ]; then
+          HIGH=$(grep -c 'severity="High"' ./checkmarx-results/results.xml || echo "0")
+          MEDIUM=$(grep -c 'severity="Medium"' ./checkmarx-results/results.xml || echo "0")
+          LOW=$(grep -c 'severity="Low"' ./checkmarx-results/results.xml || echo "0")
+        fi
+        
+        echo "high-severity=$HIGH" >> $GITHUB_OUTPUT
+        echo "medium-severity=$MEDIUM" >> $GITHUB_OUTPUT
+        echo "low-severity=$LOW" >> $GITHUB_OUTPUT
+        
+        # Set environment variables for next steps
+        echo "CX_HIGH=$HIGH" >> $GITHUB_ENV
+        echo "CX_MEDIUM=$MEDIUM" >> $GITHUB_ENV
+        echo "CX_LOW=$LOW" >> $GITHUB_ENV
+
+    - name: Generate Security Report
+      shell: bash
+      if: always()
+      run: |
+        echo "## 🛡️ Checkmarx Security Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Project:** ${{ env.CX_PROJECT_NAME }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| 🔴 High | ${{ env.CX_HIGH }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🟡 Medium | ${{ env.CX_MEDIUM }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🔵 Low | ${{ env.CX_LOW }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Determine overall status
+        TOTAL_CRITICAL=$((CX_HIGH + CX_MEDIUM))
+        if [ $TOTAL_CRITICAL -eq 0 ]; then
+          echo "✅ **Security Scan Passed** - No high or medium severity vulnerabilities found." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ **Security Issues Found** - $TOTAL_CRITICAL high/medium severity vulnerabilities detected." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please review the detailed scan results and remediate the identified vulnerabilities." >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Comment PR with Results
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const high = '${{ env.CX_HIGH }}';
+          const medium = '${{ env.CX_MEDIUM }}';
+          const low = '${{ env.CX_LOW }}';
+          const total = parseInt(high) + parseInt(medium);
+          
+          const status = total === 0 ? '✅' : '⚠️';
+          const statusText = total === 0 ? 'PASSED' : 'ISSUES FOUND';
+          
+          const comment = `## 🛡️ Checkmarx Security Scan ${status}
+          
+          **Status:** ${statusText}
+          **Project:** ${{ env.CX_PROJECT_NAME }}
+          
+          ### Vulnerability Summary
+          - 🔴 **High:** ${high}
+          - 🟡 **Medium:** ${medium}  
+          - 🔵 **Low:** ${low}
+          
+          ${total > 0 ? '⚠️ Please review and remediate the identified vulnerabilities before merging.' : '✅ No critical security vulnerabilities found.'}
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: Fail on High/Medium Vulnerabilities
+      shell: bash
+      if: always()
+      run: |
+        TOTAL_CRITICAL=$((CX_HIGH + CX_MEDIUM))
+        if [ $TOTAL_CRITICAL -gt 0 ]; then
+          echo "❌ Security scan failed: Found $TOTAL_CRITICAL high/medium severity vulnerabilities"
+          echo "High: $CX_HIGH, Medium: $CX_MEDIUM"
+          exit 1
+        else
+          echo "✅ Security scan passed: No high/medium severity vulnerabilities found"
+        fi
+
+branding:
+  icon: 'shield'
+  color: 'red'

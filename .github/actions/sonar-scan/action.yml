@@ -1,0 +1,155 @@
+name: 'SonarQube Security & Quality Scan'
+description: 'Performs SonarQube static analysis with security scanning and quality gates'
+author: 'DevOps Team'
+
+inputs:
+  sonar-token:
+    description: 'SonarQube authentication token'
+    required: true
+  github-token:
+    description: 'GitHub token for PR decoration'
+    required: true
+  java-version:
+    description: 'Java version to use'
+    required: false
+    default: '17'
+  working-directory:
+    description: 'Working directory for the scan'
+    required: false
+    default: 'apps/java-app'
+  sonar-organization:
+    description: 'SonarQube organization'
+    required: false
+    default: ''
+  sonar-project-key:
+    description: 'SonarQube project key'
+    required: false
+    default: ''
+  coverage-path:
+    description: 'Path to coverage reports'
+    required: false
+    default: 'target/site/jacoco/jacoco.xml'
+  pr-number:
+    description: 'Pull request number'
+    required: false
+    default: ''
+  pr-branch:
+    description: 'Pull request source branch'
+    required: false
+    default: ''
+  pr-base:
+    description: 'Pull request target branch'
+    required: false
+    default: ''
+
+outputs:
+  quality-gate-status:
+    description: 'SonarQube quality gate status'
+    value: ${{ steps.sonar-scan.outputs.quality-gate-status }}
+  analysis-url:
+    description: 'SonarQube analysis URL'
+    value: ${{ steps.sonar-scan.outputs.analysis-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ inputs.java-version }}
+        distribution: 'temurin'
+
+    - name: Cache SonarQube packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.sonar/cache
+        key: ${{ runner.os }}-sonar-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-sonar-
+
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+
+    - name: Download Coverage Reports
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: coverage-report
+        path: ${{ inputs.working-directory }}/target/site/jacoco/
+
+    - name: Set SonarQube Properties
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Set dynamic project key if not provided
+        if [ -z "${{ inputs.sonar-project-key }}" ]; then
+          PROJECT_KEY="${{ github.repository_owner }}_$(basename $(pwd))"
+        else
+          PROJECT_KEY="${{ inputs.sonar-project-key }}"
+        fi
+        echo "SONAR_PROJECT_KEY=$PROJECT_KEY" >> $GITHUB_ENV
+        
+        # Set organization if not provided
+        if [ -z "${{ inputs.sonar-organization }}" ]; then
+          ORG="${{ github.repository_owner }}"
+        else
+          ORG="${{ inputs.sonar-organization }}"
+        fi
+        echo "SONAR_ORGANIZATION=$ORG" >> $GITHUB_ENV
+
+    - name: Run SonarQube Analysis
+      id: sonar-scan
+      uses: sonarqube-community/sonarqube-scan-action@master
+      with:
+        projectBaseDir: ${{ inputs.working-directory }}
+        args: >
+          -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+          -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+          -Dsonar.host.url=https://sonarcloud.io
+          -Dsonar.login=${{ inputs.sonar-token }}
+          -Dsonar.coverage.jacoco.xmlReportPaths=${{ inputs.coverage-path }}
+          -Dsonar.java.binaries=target/classes
+          -Dsonar.exclusions=**/JavaAppApplication.java,**/config/**/*
+          -Dsonar.test.exclusions=**/*Test.java,**/*Tests.java
+          -Dsonar.pullrequest.key=${{ inputs.pr-number }}
+          -Dsonar.pullrequest.branch=${{ inputs.pr-branch }}
+          -Dsonar.pullrequest.base=${{ inputs.pr-base }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+
+    - name: SonarQube Quality Gate Check
+      id: quality-gate
+      uses: sonarqube-community/sonarqube-quality-gate-action@master
+      with:
+        scanMetadataReportFile: ${{ inputs.working-directory }}/.scannerwork/report-task.txt
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+
+    - name: Generate SonarQube Report
+      shell: bash
+      if: always()
+      run: |
+        echo "## 🔍 SonarQube Analysis Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Quality Gate Status:** ${{ steps.quality-gate.outputs.quality-gate-status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Project Key:** ${{ env.SONAR_PROJECT_KEY }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Analysis URL:** [View Detailed Report](https://sonarcloud.io/dashboard?id=${{ env.SONAR_PROJECT_KEY }})" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.quality-gate.outputs.quality-gate-status }}" != "PASSED" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Quality Gate Failed** - Please review and fix the issues before merging." >> $GITHUB_STEP_SUMMARY
+          exit 1
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Quality Gate Passed** - All quality checks met the required standards." >> $GITHUB_STEP_SUMMARY
+        fi
+
+branding:
+  icon: 'shield'
+  color: 'blue'

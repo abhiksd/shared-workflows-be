@@ -83,7 +83,7 @@ resources:
 - **Moderate resources** (1000m CPU, 2Gi memory)
 - **HPA enabled** (2-5 replicas based on load)
 - **Network policies** for security testing
-- **Service mesh support** for advanced testing
+- **Advanced network testing** capabilities
 - **Quality gates** enabled for performance testing
 - **Monitoring and alerting** configured
 
@@ -130,7 +130,7 @@ autoscaling:
 - **Comprehensive monitoring** with PrometheusRules
 - **Disaster recovery** configuration
 - **Backup and persistence** enabled
-- **Service mesh** with Istio for advanced traffic management
+- **Advanced traffic management** for production workloads
 
 #### Security Profile:
 - CORS restricted to production domains only

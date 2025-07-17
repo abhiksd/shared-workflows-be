@@ -313,7 +313,7 @@ monitoring:
 ### Network Security
 - Network policies (optional)
 - TLS termination at ingress
-- Service mesh integration (optional)
+- Network security policies
 
 ### Supply Chain Security
 - SBOM generation

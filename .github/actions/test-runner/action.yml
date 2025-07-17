@@ -1,0 +1,297 @@
+name: 'Test Runner'
+description: 'Executes unit, integration, and regression tests with code coverage reporting'
+author: 'DevOps Team'
+
+inputs:
+  test-type:
+    description: 'Type of tests to run (unit, integration, regression, all)'
+    required: true
+    default: 'unit'
+  java-version:
+    description: 'Java version to use'
+    required: false
+    default: '17'
+  working-directory:
+    description: 'Working directory for tests'
+    required: false
+    default: 'apps/java-app'
+  coverage-threshold:
+    description: 'Minimum code coverage percentage'
+    required: false
+    default: '80'
+  maven-opts:
+    description: 'Maven options'
+    required: false
+    default: '-Xmx3072m'
+  skip-tests:
+    description: 'Skip test execution (for build-only)'
+    required: false
+    default: 'false'
+  github-token:
+    description: 'GitHub token for PR comments'
+    required: false
+
+outputs:
+  test-result:
+    description: 'Test execution result (success/failure)'
+    value: ${{ steps.run-tests.outputs.result }}
+  coverage-percentage:
+    description: 'Code coverage percentage'
+    value: ${{ steps.coverage.outputs.percentage }}
+  test-count:
+    description: 'Number of tests executed'
+    value: ${{ steps.test-summary.outputs.count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ inputs.java-version }}
+        distribution: 'temurin'
+
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-m2-
+
+    - name: Determine Test Profile
+      id: test-profile
+      shell: bash
+      run: |
+        case "${{ inputs.test-type }}" in
+          "unit")
+            echo "profile=unit-tests" >> $GITHUB_OUTPUT
+            echo "description=Unit Tests" >> $GITHUB_OUTPUT
+            ;;
+          "integration")
+            echo "profile=integration-tests" >> $GITHUB_OUTPUT
+            echo "description=Integration Tests" >> $GITHUB_OUTPUT
+            ;;
+          "regression")
+            echo "profile=regression-tests" >> $GITHUB_OUTPUT
+            echo "description=Regression Tests" >> $GITHUB_OUTPUT
+            ;;
+          "all")
+            echo "profile=" >> $GITHUB_OUTPUT
+            echo "description=All Tests" >> $GITHUB_OUTPUT
+            ;;
+          *)
+            echo "❌ Invalid test type: ${{ inputs.test-type }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Run Tests
+      id: run-tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        MAVEN_OPTS: ${{ inputs.maven-opts }}
+      run: |
+        if [ "${{ inputs.skip-tests }}" = "true" ]; then
+          echo "⏭️ Skipping test execution"
+          echo "result=skipped" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "🧪 Running ${{ steps.test-profile.outputs.description }}..."
+        
+        # Determine Maven command based on test type
+        if [ "${{ inputs.test-type }}" = "integration" ]; then
+          MAVEN_CMD="mvn clean verify"
+        else
+          MAVEN_CMD="mvn clean test"
+        fi
+        
+        # Add profile if specified
+        if [ -n "${{ steps.test-profile.outputs.profile }}" ]; then
+          MAVEN_CMD="$MAVEN_CMD -P${{ steps.test-profile.outputs.profile }}"
+        fi
+        
+        # Add common options
+        MAVEN_CMD="$MAVEN_CMD -Dspring.profiles.active=test -Dmaven.test.failure.ignore=false"
+        
+        echo "Executing: $MAVEN_CMD"
+        
+        if $MAVEN_CMD; then
+          echo "✅ Tests passed"
+          echo "result=success" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Tests failed"
+          echo "result=failure" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Generate Code Coverage Report
+      if: inputs.test-type == 'unit' || inputs.test-type == 'all'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "📊 Generating code coverage report..."
+        mvn jacoco:report
+
+    - name: Extract Coverage Percentage
+      id: coverage
+      if: inputs.test-type == 'unit' || inputs.test-type == 'all'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "target/site/jacoco/index.html" ]; then
+          COVERAGE=$(grep -oP 'Total.*?(\d+)%' target/site/jacoco/index.html | grep -oP '\d+' | tail -1 || echo "0")
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "📊 Code Coverage: $COVERAGE%"
+          
+          # Set environment variable for other steps
+          echo "COVERAGE_PERCENTAGE=$COVERAGE" >> $GITHUB_ENV
+        else
+          echo "percentage=0" >> $GITHUB_OUTPUT
+          echo "COVERAGE_PERCENTAGE=0" >> $GITHUB_ENV
+          echo "⚠️ Coverage report not found"
+        fi
+
+    - name: Check Coverage Threshold
+      if: inputs.test-type == 'unit' || inputs.test-type == 'all'
+      shell: bash
+      run: |
+        THRESHOLD=${{ inputs.coverage-threshold }}
+        COVERAGE=${COVERAGE_PERCENTAGE:-0}
+        
+        echo "📊 Coverage: $COVERAGE% (Threshold: $THRESHOLD%)"
+        
+        if [ "$COVERAGE" -lt "$THRESHOLD" ]; then
+          echo "❌ Code coverage ($COVERAGE%) is below the required threshold ($THRESHOLD%)"
+          exit 1
+        else
+          echo "✅ Code coverage meets the required threshold"
+        fi
+
+    - name: Parse Test Results
+      id: test-summary
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      if: always()
+      run: |
+        # Initialize counters
+        TOTAL_TESTS=0
+        FAILED_TESTS=0
+        SKIPPED_TESTS=0
+        
+        # Parse test results from surefire reports
+        if [ -d "target/surefire-reports" ]; then
+          for file in target/surefire-reports/TEST-*.xml; do
+            if [ -f "$file" ]; then
+              TESTS=$(grep -o 'tests="[0-9]*"' "$file" | cut -d'"' -f2 || echo "0")
+              FAILURES=$(grep -o 'failures="[0-9]*"' "$file" | cut -d'"' -f2 || echo "0")
+              ERRORS=$(grep -o 'errors="[0-9]*"' "$file" | cut -d'"' -f2 || echo "0")
+              SKIPPED=$(grep -o 'skipped="[0-9]*"' "$file" | cut -d'"' -f2 || echo "0")
+              
+              TOTAL_TESTS=$((TOTAL_TESTS + TESTS))
+              FAILED_TESTS=$((FAILED_TESTS + FAILURES + ERRORS))
+              SKIPPED_TESTS=$((SKIPPED_TESTS + SKIPPED))
+            fi
+          done
+        fi
+        
+        PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS - SKIPPED_TESTS))
+        
+        echo "count=$TOTAL_TESTS" >> $GITHUB_OUTPUT
+        echo "passed=$PASSED_TESTS" >> $GITHUB_OUTPUT
+        echo "failed=$FAILED_TESTS" >> $GITHUB_OUTPUT
+        echo "skipped=$SKIPPED_TESTS" >> $GITHUB_OUTPUT
+        
+        # Set environment variables for reporting
+        echo "TEST_TOTAL=$TOTAL_TESTS" >> $GITHUB_ENV
+        echo "TEST_PASSED=$PASSED_TESTS" >> $GITHUB_ENV
+        echo "TEST_FAILED=$FAILED_TESTS" >> $GITHUB_ENV
+        echo "TEST_SKIPPED=$SKIPPED_TESTS" >> $GITHUB_ENV
+
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ inputs.test-type }}
+        path: |
+          ${{ inputs.working-directory }}/target/surefire-reports/
+          ${{ inputs.working-directory }}/target/failsafe-reports/
+        retention-days: 30
+
+    - name: Upload Coverage Reports
+      uses: actions/upload-artifact@v4
+      if: (inputs.test-type == 'unit' || inputs.test-type == 'all') && always()
+      with:
+        name: coverage-report
+        path: ${{ inputs.working-directory }}/target/site/jacoco/
+        retention-days: 30
+
+    - name: Generate Test Summary
+      shell: bash
+      if: always()
+      run: |
+        echo "## 🧪 ${{ steps.test-profile.outputs.description }} Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Test Type:** ${{ inputs.test-type }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ steps.run-tests.outputs.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ inputs.skip-tests }}" != "true" ]; then
+          echo "### 📊 Test Statistics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Passed | ${TEST_PASSED:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ❌ Failed | ${TEST_FAILED:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏭️ Skipped | ${TEST_SKIPPED:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📋 Total | ${TEST_TOTAL:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.test-type }}" = "unit" ] || [ "${{ inputs.test-type }}" = "all" ]; then
+            echo "### 📈 Code Coverage" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Coverage:** ${COVERAGE_PERCENTAGE:-0}%" >> $GITHUB_STEP_SUMMARY
+            echo "**Threshold:** ${{ inputs.coverage-threshold }}%" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${COVERAGE_PERCENTAGE:-0}" -ge "${{ inputs.coverage-threshold }}" ]; then
+              echo "✅ Coverage meets minimum threshold" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Coverage below minimum threshold" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+        fi
+
+    - name: Comment Coverage on PR
+      if: github.event_name == 'pull_request' && (inputs.test-type == 'unit' || inputs.test-type == 'all') && inputs.github-token != ''
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const coverage = '${{ steps.coverage.outputs.percentage }}' || '0';
+          const threshold = '${{ inputs.coverage-threshold }}';
+          const status = parseInt(coverage) >= parseInt(threshold) ? '✅' : '❌';
+          const statusText = parseInt(coverage) >= parseInt(threshold) ? 'PASSED' : 'FAILED';
+          
+          const comment = `## 📊 Code Coverage Report ${status}
+          
+          **Status:** ${statusText}
+          **Coverage:** ${coverage}%
+          **Threshold:** ${threshold}%
+          **Tests:** ${process.env.TEST_TOTAL || '0'} total, ${process.env.TEST_PASSED || '0'} passed, ${process.env.TEST_FAILED || '0'} failed
+          
+          ${parseInt(coverage) >= parseInt(threshold) ? '✅ Coverage meets minimum threshold' : '❌ Coverage below minimum threshold - please add more tests'}
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
