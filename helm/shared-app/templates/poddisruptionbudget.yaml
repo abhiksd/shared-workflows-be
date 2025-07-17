@@ -1,18 +1,19 @@
 {{- if .Values.podDisruptionBudget.enabled }}
+{{- $_ := include "shared-app.validateValues" . }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "shared-app.fullname" . }}
+  name: {{ include "shared-app.fullname" . }}-pdb
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "shared-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+    {{- with .Values.podDisruptionBudget.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  {{- if .Values.podDisruptionBudget.minAvailable }}
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
-  {{- end }}
-  {{- if .Values.podDisruptionBudget.maxUnavailable }}
-  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
-  {{- end }}
+  {{- include "shared-app.pdbSpec" . | nindent 2 }}
   selector:
     matchLabels:
       {{- include "shared-app.selectorLabels" . | nindent 6 }}

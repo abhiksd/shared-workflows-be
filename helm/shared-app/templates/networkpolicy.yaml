@@ -1,0 +1,100 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $_ := include "shared-app.validateValues" . }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "shared-app.fullname" . }}-netpol
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shared-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+    {{- with .Values.networkPolicy.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "shared-app.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if .Values.networkPolicy.egress.enabled }}
+    - Egress
+    {{- end }}
+  ingress:
+    # Allow ingress from ingress controller
+    {{- if .Values.ingress.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: {{ .Values.networkPolicy.ingress.ingressNamespace | default "ingress-nginx" }}
+      ports:
+        - protocol: TCP
+          port: {{ include "shared-app.applicationPort" . }}
+    {{- end }}
+    # Allow ingress from same namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: {{ .Release.Namespace }}
+      ports:
+        - protocol: TCP
+          port: {{ include "shared-app.applicationPort" . }}
+        {{- if .Values.metrics.enabled }}
+        - protocol: TCP
+          port: {{ .Values.metrics.port | default 9090 }}
+        {{- end }}
+    # Allow custom ingress rules
+    {{- with .Values.networkPolicy.ingress.customRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.networkPolicy.egress.enabled }}
+  egress:
+    # Allow DNS resolution
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow HTTPS to external services
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
+    # Allow database access
+    {{- if .Values.database.enabled }}
+    - to:
+        {{- if .Values.database.namespaceSelector }}
+        - namespaceSelector:
+            {{- toYaml .Values.database.namespaceSelector | nindent 12 }}
+        {{- else }}
+        - namespaceSelector:
+            matchLabels:
+              name: {{ .Values.database.namespace | default "database" }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.database.port | default 5432 }}
+    {{- end }}
+    # Allow Redis access
+    {{- if .Values.redis.enabled }}
+    - to:
+        {{- if .Values.redis.namespaceSelector }}
+        - namespaceSelector:
+            {{- toYaml .Values.redis.namespaceSelector | nindent 12 }}
+        {{- else }}
+        - namespaceSelector:
+            matchLabels:
+              name: {{ .Values.redis.namespace | default "redis" }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.redis.port | default 6379 }}
+    {{- end }}
+    # Allow custom egress rules
+    {{- with .Values.networkPolicy.egress.customRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}

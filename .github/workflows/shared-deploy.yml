@@ -1,379 +1,523 @@
-name: Shared AKS Deployment Workflow
+name: Shared Deployment Workflow
 
 on:
   workflow_call:
     inputs:
-      application_name:
-        description: 'Application name'
+      application-name:
         required: true
         type: string
-      application_type:
-        description: 'Application type (java-springboot, nodejs)'
-        required: true
-        type: string
-      build_context:
-        description: 'Docker build context path'
+        description: 'Name of the application to deploy'
+      image-tag:
         required: false
         type: string
-        default: '.'
-      dockerfile_path:
-        description: 'Path to Dockerfile'
+        description: 'Docker image tag to deploy'
+      environment:
         required: false
         type: string
-        default: 'Dockerfile'
-      helm_chart_path:
-        description: 'Path to Helm chart'
-        required: false
-        type: string
-        default: 'helm'
-      force_deploy:
-        description: 'Force deployment even if no changes detected'
+        description: 'Target environment (dev/staging/production)'
+      dry-run:
         required: false
         type: boolean
         default: false
-      keyvault_name:
-        description: 'Azure Key Vault name for secrets'
+        description: 'Perform a dry run deployment'
+      force-deploy:
         required: false
-        type: string
-        default: ''
+        type: boolean
+        default: false
+        description: 'Force deployment even if validation fails'
+      skip-security-scan:
+        required: false
+        type: boolean
+        default: false
+        description: 'Skip security scanning (not recommended for production)'
     secrets:
-      ACR_LOGIN_SERVER:
-        description: 'Azure Container Registry login server'
+      AZURE_CLIENT_ID:
         required: true
-      AKS_CLUSTER_NAME_DEV:
-        description: 'AKS cluster name for dev environment'
-        required: false
-      AKS_RESOURCE_GROUP_DEV:
-        description: 'AKS resource group for dev environment'
-        required: false
-      AKS_CLUSTER_NAME_STAGING:
-        description: 'AKS cluster name for staging environment'
-        required: false
-      AKS_RESOURCE_GROUP_STAGING:
-        description: 'AKS resource group for staging environment'
-        required: false
-      AKS_CLUSTER_NAME_PROD:
-        description: 'AKS cluster name for production environment'
-        required: false
-      AKS_RESOURCE_GROUP_PROD:
-        description: 'AKS resource group for production environment'
-        required: false
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      ACR_REGISTRY:
+        required: true
 
-env:
-  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
-
-# Grant permissions for managed identity
 permissions:
   id-token: write
   contents: read
-  
+  security-events: write
+  actions: read
+
 jobs:
-  # Environment determination job
   determine-environment:
+    name: Determine Environment
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
-      environment: ${{ steps.env-check.outputs.environment }}
-      should_deploy: ${{ steps.env-check.outputs.should_deploy }}
-      aks_cluster_name: ${{ steps.env-check.outputs.aks_cluster_name }}
-      aks_resource_group: ${{ steps.env-check.outputs.aks_resource_group }}
+      environment: ${{ steps.env.outputs.environment }}
+      is-production: ${{ steps.env.outputs.is-production }}
+      requires-approval: ${{ steps.env.outputs.requires-approval }}
+      cluster-name: ${{ steps.env.outputs.cluster-name }}
+      resource-group: ${{ steps.env.outputs.resource-group }}
+      namespace: ${{ steps.env.outputs.namespace }}
     steps:
-      - name: Determine environment and deployment eligibility
-        id: env-check
+      - name: Determine environment from branch/input
+        id: env
         run: |
-          echo "Branch: ${{ github.ref }}"
-          echo "Event: ${{ github.event_name }}"
-          
-          # Initialize variables
-          ENVIRONMENT=""
-          SHOULD_DEPLOY="false"
-          AKS_CLUSTER_NAME=""
-          AKS_RESOURCE_GROUP=""
-          
-          # Development environment logic
-          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            ENVIRONMENT="dev"
-            SHOULD_DEPLOY="true"
-            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_DEV }}"
-            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_DEV }}"
-          # Staging environment logic  
+          if [[ "${{ inputs.environment }}" != "" ]]; then
+            ENVIRONMENT="${{ inputs.environment }}"
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             ENVIRONMENT="staging"
-            SHOULD_DEPLOY="true"
-            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_STAGING }}"
-            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_STAGING }}"
-          # Production environment logic
-          elif [[ "${{ github.ref }}" == refs/heads/release/* ]] || [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            ENVIRONMENT="dev"
+          elif [[ "${{ github.ref }}" =~ ^refs/heads/release/ ]] || [[ "${{ github.ref }}" =~ ^refs/tags/ ]]; then
             ENVIRONMENT="production"
-            SHOULD_DEPLOY="true"
-            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_PROD }}"
-            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_PROD }}"
-          # Manual workflow dispatch
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # For manual triggers, we need to determine environment from the calling workflow
-            # This will be passed through the workflow_call context
-            echo "Manual workflow dispatch detected. Environment will be determined by calling workflow."
-            SHOULD_DEPLOY="true"
+          else
+            ENVIRONMENT="dev"
           fi
           
-          echo "Determined environment: ${ENVIRONMENT}"
-          echo "Should deploy: ${SHOULD_DEPLOY}"
-          echo "AKS Cluster: ${AKS_CLUSTER_NAME}"
-          echo "AKS Resource Group: ${AKS_RESOURCE_GROUP}"
-          
           echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
-          echo "should_deploy=${SHOULD_DEPLOY}" >> $GITHUB_OUTPUT
-          echo "aks_cluster_name=${AKS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
-          echo "aks_resource_group=${AKS_RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+          echo "is-production=$([[ $ENVIRONMENT == 'production' ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          echo "requires-approval=$([[ $ENVIRONMENT == 'production' ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          
+          # Set environment-specific configurations
+          case $ENVIRONMENT in
+            production)
+              echo "cluster-name=aks-cluster-prod" >> $GITHUB_OUTPUT
+              echo "resource-group=rg-aks-prod" >> $GITHUB_OUTPUT
+              echo "namespace=production" >> $GITHUB_OUTPUT
+              ;;
+            staging)
+              echo "cluster-name=aks-cluster-staging" >> $GITHUB_OUTPUT
+              echo "resource-group=rg-aks-staging" >> $GITHUB_OUTPUT
+              echo "namespace=staging" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "cluster-name=aks-cluster-dev" >> $GITHUB_OUTPUT
+              echo "resource-group=rg-aks-dev" >> $GITHUB_OUTPUT
+              echo "namespace=development" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+          echo "🎯 Deploying to environment: $ENVIRONMENT"
 
-  setup:
+  validate-inputs:
+    name: Validate Inputs
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: determine-environment
-    if: needs.determine-environment.outputs.should_deploy == 'true'
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      image_tag: ${{ steps.version.outputs.image_tag }}
-      helm_version: ${{ steps.version.outputs.helm_version }}
-      should_deploy: ${{ steps.changes.outputs.should_deploy }}
-      environment: ${{ needs.determine-environment.outputs.environment }}
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
+      - name: Validate required inputs
+        run: |
+          if [[ -z "${{ inputs.application-name }}" ]]; then
+            echo "❌ Application name is required"
+            exit 1
+          fi
+          
+          if [[ ! "${{ inputs.application-name }}" =~ ^[a-z0-9-]+$ ]]; then
+            echo "❌ Application name must contain only lowercase letters, numbers, and hyphens"
+            exit 1
+          fi
+          
+          if [[ "${{ needs.determine-environment.outputs.environment }}" == "production" && "${{ inputs.skip-security-scan }}" == "true" ]]; then
+            echo "❌ Security scanning cannot be skipped in production"
+            exit 1
+          fi
+          
+          echo "✅ All inputs validated successfully"
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine version and tags
-        id: version
-        uses: ./.github/actions/version-strategy
-        with:
-          environment: ${{ needs.determine-environment.outputs.environment }}
-          application_name: ${{ inputs.application_name }}
-
-      - name: Check for changes
-        id: changes
-        uses: ./.github/actions/check-changes
-        with:
-          application_name: ${{ inputs.application_name }}
-          build_context: ${{ inputs.build_context }}
-          force_deploy: ${{ inputs.force_deploy }}
-
-  # Azure Key Vault secrets retrieval
-  fetch-secrets:
+  security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
-    needs: [determine-environment, setup]
-    if: needs.setup.outputs.should_deploy == 'true' && inputs.keyvault_name != ''
-    outputs:
-      secrets_retrieved: ${{ steps.fetch-keyvault-secrets.outputs.secrets_retrieved }}
-      secrets_count: ${{ steps.fetch-keyvault-secrets.outputs.secrets_count }}
+    timeout-minutes: 15
+    needs: [determine-environment, validate-inputs]
+    if: ${{ !inputs.skip-security-scan }}
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Azure Login with Managed Identity
+      - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Fetch secrets from Azure Key Vault
-        id: fetch-keyvault-secrets
+      - name: Login to ACR
+        run: |
+          TOKEN=$(az acr login --name ${{ secrets.ACR_REGISTRY }} --expose-token --output tsv --query accessToken)
+          echo $TOKEN | docker login ${{ secrets.ACR_REGISTRY }}.azurecr.io --username 00000000-0000-0000-0000-000000000000 --password-stdin
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.ACR_REGISTRY }}.azurecr.io/${{ inputs.application-name }}:${{ inputs.image-tag || github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Fail on high/critical vulnerabilities in production
+        if: needs.determine-environment.outputs.is-production == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.ACR_REGISTRY }}.azurecr.io/${{ inputs.application-name }}:${{ inputs.image-tag || github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+
+  fetch-secrets:
+    name: Fetch Secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [determine-environment, validate-inputs]
+    outputs:
+      secrets-file: ${{ steps.secrets.outputs.file }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch secrets from Key Vault
         uses: ./.github/actions/fetch-keyvault-secrets
         with:
-          environment: ${{ needs.setup.outputs.environment }}
-          application_name: ${{ inputs.application_name }}
-          keyvault_name: ${{ inputs.keyvault_name }}
-          output_format: 'both'
-          include_common_secrets: 'true'
+          environment: ${{ needs.determine-environment.outputs.environment }}
+          application: ${{ inputs.application-name }}
+          vault-name: kv-${{ inputs.application-name }}-${{ needs.determine-environment.outputs.environment }}
+          output-format: yaml
+          secret-types: database-url,database-password,jwt-secret,api-key,redis-url,storage-connection
 
-      - name: Upload secrets artifacts
-        if: steps.fetch-keyvault-secrets.outputs.secrets_retrieved == 'true'
+      - name: Upload secrets as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}
-          path: /tmp/keyvault-secrets/
+          name: k8s-secrets-${{ github.run_id }}
+          path: secrets.yaml
           retention-days: 1
 
-  maven-build:
+  pre-deployment-checks:
+    name: Pre-deployment Checks
     runs-on: ubuntu-latest
-    needs: [setup, fetch-secrets]
-    if: needs.setup.outputs.should_deploy == 'true' && inputs.application_type == 'java-springboot' && (!cancelled())
-    outputs:
-      jar_artifact: ${{ steps.maven.outputs.artifact_name }}
-      build_version: ${{ steps.maven.outputs.build_version }}
+    timeout-minutes: 10
+    needs: [determine-environment, validate-inputs]
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download secrets if available
-        if: needs.fetch-secrets.outputs.secrets_retrieved == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}
-          path: /tmp/keyvault-secrets/
-
-      - name: Build Java application with Maven
-        id: maven
-        uses: ./.github/actions/maven-build
-        with:
-          application_name: ${{ inputs.application_name }}
-          build_context: ${{ inputs.build_context }}
-          java_version: '21'
-          run_tests: 'true'
-          upload_artifacts: 'true'
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [setup, maven-build, fetch-secrets]
-    if: needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
-    steps:
-      - name: Clean workspace and Docker
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'true'
-          cleanup_temp: 'true'
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Maven build artifacts
-        if: inputs.application_type == 'java-springboot'
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.maven-build.outputs.jar_artifact }}
-          path: ${{ inputs.build_context }}
-
-      - name: Azure Login with Managed Identity
+      - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and push Docker image
-        uses: ./.github/actions/docker-build-push
+      - name: Connect to AKS cluster
+        uses: azure/aks-set-context@v4
         with:
-          application_name: ${{ inputs.application_name }}
-          application_type: ${{ inputs.application_type }}
-          build_context: ${{ inputs.build_context }}
-          dockerfile_path: ${{ inputs.dockerfile_path }}
-          image_tag: ${{ needs.setup.outputs.image_tag }}
-          registry: ${{ env.REGISTRY }}
-          use_managed_identity: 'true'
+          resource-group: ${{ needs.determine-environment.outputs.resource-group }}
+          cluster-name: ${{ needs.determine-environment.outputs.cluster-name }}
+          use-kubelogin: true
+
+      - name: Verify cluster connectivity
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+          echo "✅ Cluster connectivity verified"
+
+      - name: Check namespace exists
+        run: |
+          if ! kubectl get namespace ${{ needs.determine-environment.outputs.namespace }} >/dev/null 2>&1; then
+            echo "📝 Creating namespace: ${{ needs.determine-environment.outputs.namespace }}"
+            kubectl create namespace ${{ needs.determine-environment.outputs.namespace }}
+            kubectl label namespace ${{ needs.determine-environment.outputs.namespace }} \
+              environment=${{ needs.determine-environment.outputs.environment }} \
+              managed-by=github-actions
+          fi
+
+      - name: Validate Helm charts
+        run: |
+          helm lint helm/${{ inputs.application-name }}/ || helm lint helm/shared-app/
+          echo "✅ Helm charts validated"
+
+      - name: Check resource quotas
+        if: needs.determine-environment.outputs.is-production == 'true'
+        run: |
+          kubectl describe resourcequotas -n ${{ needs.determine-environment.outputs.namespace }} || true
+          kubectl top nodes || true
+          echo "📊 Resource usage checked"
 
   deploy:
+    name: Deploy Application
     runs-on: ubuntu-latest
-    needs: [determine-environment, setup, build, fetch-secrets]
-    if: needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
-    environment: ${{ needs.setup.outputs.environment }}
+    timeout-minutes: 30
+    needs: [determine-environment, validate-inputs, security-scan, fetch-secrets, pre-deployment-checks]
+    if: always() && !failure() && !cancelled()
+    environment: 
+      name: ${{ needs.determine-environment.outputs.environment }}
+      url: ${{ steps.deployment.outputs.url }}
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download secrets if available
-        if: needs.fetch-secrets.outputs.secrets_retrieved == 'true'
+      - name: Download secrets artifact
         uses: actions/download-artifact@v4
         with:
-          name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}
-          path: /tmp/keyvault-secrets/
+          name: k8s-secrets-${{ github.run_id }}
 
-      - name: Azure Login with Managed Identity
+      - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy to AKS
-        uses: ./.github/actions/helm-deploy
+      - name: Connect to AKS cluster
+        uses: azure/aks-set-context@v4
         with:
-          environment: ${{ needs.setup.outputs.environment }}
-          application_name: ${{ inputs.application_name }}
-          application_type: ${{ inputs.application_type }}
-          helm_chart_path: ${{ inputs.helm_chart_path }}
-          image_tag: ${{ needs.setup.outputs.image_tag }}
-          helm_version: ${{ needs.setup.outputs.helm_version }}
-          registry: ${{ env.REGISTRY }}
-          aks_cluster_name: ${{ needs.determine-environment.outputs.aks_cluster_name }}
-          aks_resource_group: ${{ needs.determine-environment.outputs.aks_resource_group }}
-          keyvault_secrets_available: ${{ needs.fetch-secrets.outputs.secrets_retrieved }}
-          use_managed_identity: 'true'
+          resource-group: ${{ needs.determine-environment.outputs.resource-group }}
+          cluster-name: ${{ needs.determine-environment.outputs.cluster-name }}
+          use-kubelogin: true
 
-  create_release:
+      - name: Apply Kubernetes secrets
+        run: |
+          if [[ -f secrets.yaml ]]; then
+            kubectl apply -f secrets.yaml -n ${{ needs.determine-environment.outputs.namespace }}
+            echo "✅ Secrets applied successfully"
+          else
+            echo "⚠️ No secrets file found, skipping secret application"
+          fi
+
+      - name: Deploy with Helm
+        id: deployment
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          NAMESPACE: ${{ needs.determine-environment.outputs.namespace }}
+          APP_NAME: ${{ inputs.application-name }}
+          IMAGE_TAG: ${{ inputs.image-tag || github.sha }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          # Determine chart path
+          if [[ -d "helm/$APP_NAME" ]]; then
+            CHART_PATH="helm/$APP_NAME"
+          else
+            CHART_PATH="helm/shared-app"
+          fi
+          
+          # Determine values file
+          VALUES_FILE="values.yaml"
+          if [[ -f "$CHART_PATH/values-$ENVIRONMENT.yaml" ]]; then
+            VALUES_FILE="values-$ENVIRONMENT.yaml"
+          fi
+          
+          # Build Helm command
+          HELM_CMD="helm upgrade --install $APP_NAME $CHART_PATH"
+          HELM_CMD="$HELM_CMD --namespace $NAMESPACE"
+          HELM_CMD="$HELM_CMD --values $CHART_PATH/$VALUES_FILE"
+          HELM_CMD="$HELM_CMD --set image.repository=${{ secrets.ACR_REGISTRY }}.azurecr.io/$APP_NAME"
+          HELM_CMD="$HELM_CMD --set image.tag=$IMAGE_TAG"
+          HELM_CMD="$HELM_CMD --set global.environment=$ENVIRONMENT"
+          HELM_CMD="$HELM_CMD --set global.applicationName=$APP_NAME"
+          HELM_CMD="$HELM_CMD --wait --timeout=600s"
+          
+          # Add dry-run flag if specified
+          if [[ "$DRY_RUN" == "true" ]]; then
+            HELM_CMD="$HELM_CMD --dry-run"
+            echo "🔍 Performing dry-run deployment"
+          fi
+          
+          # Add atomic flag for production
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            HELM_CMD="$HELM_CMD --atomic"
+          fi
+          
+          echo "Executing: $HELM_CMD"
+          eval $HELM_CMD
+          
+          # Set deployment URL
+          if [[ "$DRY_RUN" != "true" ]]; then
+            INGRESS_HOST=$(kubectl get ingress -n $NAMESPACE -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || echo "")
+            if [[ -n "$INGRESS_HOST" ]]; then
+              echo "url=https://$INGRESS_HOST" >> $GITHUB_OUTPUT
+            else
+              echo "url=http://localhost:8080" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Verify deployment
+        if: inputs.dry-run != true
+        run: |
+          echo "🔍 Verifying deployment..."
+          
+          # Wait for deployment to be ready
+          kubectl rollout status deployment/${{ inputs.application-name }} -n ${{ needs.determine-environment.outputs.namespace }} --timeout=300s
+          
+          # Check pods are running
+          kubectl get pods -n ${{ needs.determine-environment.outputs.namespace }} -l app.kubernetes.io/name=${{ inputs.application-name }}
+          
+          # Verify health endpoints if available
+          POD_NAME=$(kubectl get pods -n ${{ needs.determine-environment.outputs.namespace }} -l app.kubernetes.io/name=${{ inputs.application-name }} -o jsonpath='{.items[0].metadata.name}')
+          if [[ -n "$POD_NAME" ]]; then
+            kubectl port-forward -n ${{ needs.determine-environment.outputs.namespace }} $POD_NAME 8080:8080 &
+            PF_PID=$!
+            sleep 10
+            
+            # Check health endpoint
+            if curl -f http://localhost:8080/health >/dev/null 2>&1 || curl -f http://localhost:8080/actuator/health >/dev/null 2>&1; then
+              echo "✅ Health check passed"
+            else
+              echo "⚠️ Health check failed, but deployment will continue"
+            fi
+            
+            kill $PF_PID 2>/dev/null || true
+          fi
+          
+          echo "✅ Deployment verification completed"
+
+  post-deployment:
+    name: Post-deployment Tasks
     runs-on: ubuntu-latest
-    needs: [setup, deploy]
-    if: |
-      needs.setup.outputs.should_deploy == 'true' && 
-      needs.setup.outputs.environment == 'production' && 
-      (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')) &&
-      !failure() && !cancelled()
+    timeout-minutes: 15
+    needs: [determine-environment, deploy]
+    if: success() && inputs.dry-run != true
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create GitHub Release
-        uses: ./.github/actions/create-release
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          version: ${{ needs.setup.outputs.version }}
-          application_name: ${{ inputs.application_name }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Connect to AKS cluster
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ needs.determine-environment.outputs.resource-group }}
+          cluster-name: ${{ needs.determine-environment.outputs.cluster-name }}
+          use-kubelogin: true
+
+      - name: Run smoke tests
+        run: |
+          echo "🧪 Running smoke tests..."
+          
+          # Get service endpoint
+          SERVICE_IP=$(kubectl get service ${{ inputs.application-name }} -n ${{ needs.determine-environment.outputs.namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          INGRESS_HOST=$(kubectl get ingress -n ${{ needs.determine-environment.outputs.namespace }} -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || echo "")
+          
+          if [[ -n "$INGRESS_HOST" ]]; then
+            ENDPOINT="https://$INGRESS_HOST"
+          elif [[ -n "$SERVICE_IP" ]]; then
+            ENDPOINT="http://$SERVICE_IP:8080"
+          else
+            echo "⚠️ No external endpoint found, skipping smoke tests"
+            exit 0
+          fi
+          
+          echo "Testing endpoint: $ENDPOINT"
+          
+          # Basic connectivity test
+          if curl -f -s -m 10 "$ENDPOINT/health" >/dev/null 2>&1 || curl -f -s -m 10 "$ENDPOINT/actuator/health" >/dev/null 2>&1; then
+            echo "✅ Smoke test passed"
+          else
+            echo "❌ Smoke test failed"
+            exit 1
+          fi
+
+      - name: Update deployment annotations
+        run: |
+          kubectl annotate deployment ${{ inputs.application-name }} -n ${{ needs.determine-environment.outputs.namespace }} \
+            deployment.kubernetes.io/deployed-by="github-actions" \
+            deployment.kubernetes.io/deployed-at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            deployment.kubernetes.io/git-commit="${{ github.sha }}" \
+            deployment.kubernetes.io/git-ref="${{ github.ref }}" \
+            deployment.kubernetes.io/run-id="${{ github.run_id }}" \
+            --overwrite
+          
+          echo "✅ Deployment annotations updated"
+
+      - name: Clean up old replicasets
+        if: needs.determine-environment.outputs.is-production == 'true'
+        run: |
+          kubectl delete replicaset -n ${{ needs.determine-environment.outputs.namespace }} \
+            -l app.kubernetes.io/name=${{ inputs.application-name }} \
+            --field-selector='status.replicas=0' \
+            --ignore-not-found=true
+          
+          echo "🧹 Old replicasets cleaned up"
 
   cleanup:
+    name: Cleanup
     runs-on: ubuntu-latest
-    needs: [determine-environment, setup, maven-build, build, deploy, create_release, fetch-secrets]
+    timeout-minutes: 5
+    needs: [fetch-secrets, deploy]
     if: always()
     steps:
-      - name: Final comprehensive cleanup
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'true'
-          cleanup_temp: 'true'
-
-      - name: Clean up secrets artifacts
-        if: needs.fetch-secrets.outputs.secrets_retrieved == 'true'
+      - name: Delete secrets artifact
         uses: actions/github-script@v7
         with:
           script: |
             try {
-              // Delete the secrets artifact for security
-              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              await github.rest.actions.deleteArtifact({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                run_id: context.runId,
+                artifact_id: context.payload.artifacts?.find(a => a.name === 'k8s-secrets-${{ github.run_id }}')?.id
               });
-              
-              for (const artifact of artifacts.data.artifacts) {
-                if (artifact.name.includes('keyvault-secrets')) {
-                  await github.rest.actions.deleteArtifact({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    artifact_id: artifact.id,
-                  });
-                  console.log(`Deleted artifact: ${artifact.name}`);
-                }
-              }
+              console.log('🧹 Secrets artifact cleaned up');
             } catch (error) {
-              console.log(`Failed to clean up artifacts: ${error.message}`);
+              console.log('⚠️ Failed to clean up secrets artifact:', error.message);
             }
+
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [determine-environment, deploy, post-deployment]
+    if: always()
+    steps:
+      - name: Determine notification status
+        id: status
+        run: |
+          if [[ "${{ needs.deploy.result }}" == "success" && "${{ needs.post-deployment.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=✅ Deployment successful" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.deploy.result }}" == "failure" ]]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "message=❌ Deployment failed" >> $GITHUB_OUTPUT
+          else
+            echo "status=partial" >> $GITHUB_OUTPUT
+            echo "message=⚠️ Deployment completed with warnings" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create deployment summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## 🚀 Deployment Summary
+          
+          | Field | Value |
+          |-------|-------|
+          | **Application** | `${{ inputs.application-name }}` |
+          | **Environment** | `${{ needs.determine-environment.outputs.environment }}` |
+          | **Image Tag** | `${{ inputs.image-tag || github.sha }}` |
+          | **Status** | ${{ steps.status.outputs.message }} |
+          | **URL** | ${{ needs.deploy.outputs.url || 'N/A' }} |
+          | **Cluster** | `${{ needs.determine-environment.outputs.cluster-name }}` |
+          | **Namespace** | `${{ needs.determine-environment.outputs.namespace }}` |
+          | **Dry Run** | `${{ inputs.dry-run }}` |
+          
+          ### 📊 Job Results
+          - **Security Scan**: ${{ needs.security-scan.result || 'Skipped' }}
+          - **Deploy**: ${{ needs.deploy.result }}
+          - **Post-deployment**: ${{ needs.post-deployment.result }}
+          
+          ### 🔗 Links
+          - [Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - [Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+          EOF

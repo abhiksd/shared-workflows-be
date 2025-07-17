@@ -1,0 +1,42 @@
+{{- if .Values.metrics.enabled }}
+{{- $_ := include "shared-app.validateValues" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "shared-app.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shared-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  annotations:
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.metrics.port | default 9090 }}"
+    prometheus.io/path: "{{ include "shared-app.metricsPath" . }}"
+    {{- with .Values.metrics.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.metrics.service.type | default "ClusterIP" }}
+  {{- if eq (.Values.metrics.service.type | default "ClusterIP") "LoadBalancer" }}
+  {{- with .Values.metrics.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with .Values.metrics.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- if eq (.Values.metrics.service.type | default "ClusterIP") "ClusterIP" }}
+  {{- with .Values.metrics.service.clusterIP }}
+  clusterIP: {{ . }}
+  {{- end }}
+  {{- end }}
+  ports:
+    - port: {{ .Values.metrics.port | default 9090 }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "shared-app.selectorLabels" . | nindent 4 }}
+{{- end }}

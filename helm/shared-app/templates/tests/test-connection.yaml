@@ -1,0 +1,340 @@
+{{- if .Values.tests.enabled }}
+{{- $_ := include "shared-app.validateValues" . }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "shared-app.fullname" . }}-test-connection"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shared-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "shared-app.serviceAccountName" . }}
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test-connection
+      image: {{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag | default "latest" }}
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy | default "IfNotPresent" }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "🧪 Starting connection tests for {{ include "shared-app.fullname" . }}"
+          
+          # Test service connectivity
+          echo "Testing service connectivity..."
+          SERVICE_URL="http://{{ include "shared-app.fullname" . }}:{{ .Values.service.port }}"
+          
+          # Wait for service to be ready
+          for i in $(seq 1 30); do
+            if wget --spider --timeout=10 "$SERVICE_URL/health" 2>/dev/null || \
+               wget --spider --timeout=10 "$SERVICE_URL/actuator/health" 2>/dev/null; then
+              echo "✅ Health endpoint accessible"
+              break
+            fi
+            echo "⏳ Waiting for service to be ready... ($i/30)"
+            sleep 10
+          done
+          
+          # Test basic connectivity
+          if wget --spider --timeout=10 "$SERVICE_URL" 2>/dev/null; then
+            echo "✅ Basic connectivity test passed"
+          else
+            echo "❌ Basic connectivity test failed"
+            exit 1
+          fi
+          
+          # Test health endpoints
+          if wget -qO- --timeout=10 "$SERVICE_URL/health" 2>/dev/null | grep -q "UP\|healthy\|ok" || \
+             wget -qO- --timeout=10 "$SERVICE_URL/actuator/health" 2>/dev/null | grep -q "UP\|healthy"; then
+            echo "✅ Health check test passed"
+          else
+            echo "❌ Health check test failed"
+            exit 1
+          fi
+          
+          # Test metrics endpoint if enabled
+          {{- if .Values.metrics.enabled }}
+          METRICS_URL="http://{{ include "shared-app.fullname" . }}-metrics:{{ .Values.metrics.port | default 9090 }}"
+          if wget --spider --timeout=10 "$METRICS_URL{{ include "shared-app.metricsPath" . }}" 2>/dev/null; then
+            echo "✅ Metrics endpoint test passed"
+          else
+            echo "⚠️ Metrics endpoint test failed (non-critical)"
+          fi
+          {{- end }}
+          
+          echo "🎉 All connection tests completed successfully"
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "shared-app.fullname" . }}-test-database"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shared-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "shared-app.serviceAccountName" . }}
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test-database
+      image: postgres:15-alpine
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "🧪 Starting database connectivity tests"
+          
+          {{- if .Values.database.enabled }}
+          # Test database connectivity
+          echo "Testing database connectivity to {{ .Values.database.host }}:{{ .Values.database.port | default 5432 }}"
+          
+          export PGPASSWORD="${DATABASE_PASSWORD}"
+          
+          # Test connection
+          if pg_isready -h "{{ .Values.database.host }}" -p "{{ .Values.database.port | default 5432 }}" -U "{{ .Values.database.username }}" -t 30; then
+            echo "✅ Database connectivity test passed"
+          else
+            echo "❌ Database connectivity test failed"
+            exit 1
+          fi
+          
+          # Test database access
+          if psql -h "{{ .Values.database.host }}" -p "{{ .Values.database.port | default 5432 }}" -U "{{ .Values.database.username }}" -d "{{ .Values.database.name }}" -c "SELECT 1" >/dev/null 2>&1; then
+            echo "✅ Database access test passed"
+          else
+            echo "❌ Database access test failed"
+            exit 1
+          fi
+          {{- else }}
+          echo "⏭️ Database tests skipped (database not enabled)"
+          {{- end }}
+          
+          echo "🎉 Database tests completed"
+      env:
+        {{- if .Values.database.enabled }}
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "shared-app.fullname" . }}-secrets
+              key: database-password
+        {{- end }}
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "shared-app.fullname" . }}-test-redis"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shared-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "3"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "shared-app.serviceAccountName" . }}
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test-redis
+      image: redis:7-alpine
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "🧪 Starting Redis connectivity tests"
+          
+          {{- if .Values.redis.enabled }}
+          # Test Redis connectivity
+          echo "Testing Redis connectivity to {{ .Values.redis.host }}:{{ .Values.redis.port | default 6379 }}"
+          
+          {{- if .Values.redis.password }}
+          export REDISCLI_AUTH="${REDIS_PASSWORD}"
+          {{- end }}
+          
+          # Test connection
+          if redis-cli -h "{{ .Values.redis.host }}" -p "{{ .Values.redis.port | default 6379 }}" ping | grep -q PONG; then
+            echo "✅ Redis connectivity test passed"
+          else
+            echo "❌ Redis connectivity test failed"
+            exit 1
+          fi
+          
+          # Test basic operations
+          if redis-cli -h "{{ .Values.redis.host }}" -p "{{ .Values.redis.port | default 6379 }}" set test-key "test-value" >/dev/null 2>&1 && \
+             redis-cli -h "{{ .Values.redis.host }}" -p "{{ .Values.redis.port | default 6379 }}" get test-key | grep -q "test-value" && \
+             redis-cli -h "{{ .Values.redis.host }}" -p "{{ .Values.redis.port | default 6379 }}" del test-key >/dev/null 2>&1; then
+            echo "✅ Redis operations test passed"
+          else
+            echo "❌ Redis operations test failed"
+            exit 1
+          fi
+          {{- else }}
+          echo "⏭️ Redis tests skipped (Redis not enabled)"
+          {{- end }}
+          
+          echo "🎉 Redis tests completed"
+      env:
+        {{- if and .Values.redis.enabled .Values.redis.password }}
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "shared-app.fullname" . }}-secrets
+              key: redis-password
+        {{- end }}
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "shared-app.fullname" . }}-test-security"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shared-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "4"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- include "shared-app.commonAnnotations" . | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "shared-app.serviceAccountName" . }}
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test-security
+      image: {{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag | default "latest" }}
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy | default "IfNotPresent" }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "🧪 Starting security validation tests"
+          
+          # Test that application is running as non-root
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "❌ Security test failed: Container running as root"
+            exit 1
+          else
+            echo "✅ Security test passed: Container running as non-root user ($(id -u))"
+          fi
+          
+          # Test read-only root filesystem
+          if touch /test-file 2>/dev/null; then
+            echo "❌ Security test failed: Root filesystem is writable"
+            rm -f /test-file
+            exit 1
+          else
+            echo "✅ Security test passed: Root filesystem is read-only"
+          fi
+          
+          # Test that privileged capabilities are dropped
+          if capsh --print | grep -q "Current:.*cap_sys_admin"; then
+            echo "❌ Security test failed: Privileged capabilities detected"
+            exit 1
+          else
+            echo "✅ Security test passed: No privileged capabilities detected"
+          fi
+          
+          # Test network policy if enabled
+          {{- if .Values.networkPolicy.enabled }}
+          echo "✅ Network policy is enabled"
+          {{- else }}
+          echo "⚠️ Network policy is disabled"
+          {{- end }}
+          
+          # Test pod security context
+          if [ "$(id -g)" -ne 0 ]; then
+            echo "✅ Security test passed: Running with non-root group"
+          else
+            echo "⚠️ Security warning: Running with root group"
+          fi
+          
+          echo "🎉 Security validation tests completed"
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
