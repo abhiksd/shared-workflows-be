@@ -1,0 +1,157 @@
+# Development environment values for shared-app
+# This file overrides the default values.yaml for development environment
+
+global:
+  environment: dev
+  applicationName: shared-app
+  applicationType: java-springboot
+
+# Development specific replica count
+replicaCount: 1
+
+# Image configuration for development
+image:
+  repository: myregistry.azurecr.io/shared-app
+  pullPolicy: Always
+  tag: "dev-latest"
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+
+# Ingress configuration for development
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: "/"
+  hosts:
+    - host: shared-app-dev.internal.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource limits for development (lower resources)
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Autoscaling disabled for dev
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 2
+
+# Development environment variables
+env:
+  - name: ENVIRONMENT
+    value: "dev"
+  - name: APPLICATION_NAME
+    value: "shared-app"
+  - name: LOG_LEVEL
+    value: "debug"
+  - name: DEBUG
+    value: "true"
+  - name: SPRING_PROFILES_ACTIVE
+    value: "dev"
+
+# ConfigMap configuration for development
+configMap:
+  enabled: true
+  data:
+    LOG_LEVEL: "debug"
+    DEBUG: "true"
+    ENVIRONMENT: "dev"
+    DATABASE_POOL_SIZE: "5"
+    CACHE_TTL: "300"
+
+# Development specific probes (more relaxed)
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health
+    port: 8080
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod disruption budget disabled for dev
+podDisruptionBudget:
+  enabled: false
+
+# Network policy disabled for dev (for easier debugging)
+networkPolicy:
+  enabled: false
+
+# Monitoring configuration for development
+monitoring:
+  enabled: true
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+
+# Security context (more relaxed for dev)
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Volume mounts for development
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: logs
+    mountPath: /app/logs
+
+# Volumes for development
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: logs
+    emptyDir: {}
+
+# Azure Key Vault integration
+azureKeyVault:
+  enabled: true
+  vaultName: "your-keyvault-dev"
+  secrets:
+    - secretName: database-url
+      keyVaultSecretName: shared-app-dev-database-url
+    - secretName: database-password
+      keyVaultSecretName: shared-app-dev-database-password
+    - secretName: jwt-secret
+      keyVaultSecretName: shared-app-dev-jwt-secret
+    - secretName: redis-url
+      keyVaultSecretName: shared-app-dev-redis-url
+
+# Development specific annotations
+podAnnotations:
+  environment: "dev"
+  team: "development"
+  cost-center: "dev-ops"

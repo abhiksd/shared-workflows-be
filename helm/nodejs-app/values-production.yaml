@@ -1,0 +1,71 @@
+# Production environment values for Node.js application
+
+shared-app:
+  enabled: true
+
+global:
+  environment: production
+  applicationName: nodejs-app
+  applicationType: nodejs
+
+# Production specific settings
+image:
+  tag: "prod-latest"
+  pullPolicy: IfNotPresent
+
+# Higher resources for production
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+# Production specific environment variables
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: LOG_LEVEL
+    value: "warn"
+  - name: DEBUG
+    value: ""
+  - name: ENABLE_CLUSTERING
+    value: "true"
+  - name: MAX_WORKERS
+    value: "4"
+
+# Strict health checks for production
+livenessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+# Replica count for production
+replicaCount: 3
+
+# Autoscaling for production
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+# Azure Key Vault for production
+azureKeyVault:
+  enabled: true
+  vaultName: "your-keyvault-prod"
+  secrets:
+    - secretName: database-url
+      keyVaultSecretName: nodejs-app-prod-database-url
+    - secretName: api-key
+      keyVaultSecretName: nodejs-app-prod-api-key
+    - secretName: jwt-secret
+      keyVaultSecretName: nodejs-app-prod-jwt-secret
+    - secretName: redis-url
+      keyVaultSecretName: nodejs-app-prod-redis-url

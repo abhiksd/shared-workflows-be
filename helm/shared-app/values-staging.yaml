@@ -1,0 +1,206 @@
+# Staging environment values for shared-app
+# This file overrides the default values.yaml for staging environment
+
+global:
+  environment: staging
+  applicationName: shared-app
+  applicationType: java-springboot
+
+# Staging specific replica count
+replicaCount: 2
+
+# Image configuration for staging
+image:
+  repository: myregistry.azurecr.io/shared-app
+  pullPolicy: Always
+  tag: "staging-latest"
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+
+# Ingress configuration for staging
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: shared-app-staging.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: shared-app-staging-tls
+      hosts:
+        - shared-app-staging.yourdomain.com
+
+# Resource limits for staging (moderate resources)
+resources:
+  limits:
+    cpu: 750m
+    memory: 1.5Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+# Autoscaling enabled for staging
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Staging environment variables
+env:
+  - name: ENVIRONMENT
+    value: "staging"
+  - name: APPLICATION_NAME
+    value: "shared-app"
+  - name: LOG_LEVEL
+    value: "info"
+  - name: DEBUG
+    value: "false"
+  - name: SPRING_PROFILES_ACTIVE
+    value: "staging"
+
+# ConfigMap configuration for staging
+configMap:
+  enabled: true
+  data:
+    LOG_LEVEL: "info"
+    DEBUG: "false"
+    ENVIRONMENT: "staging"
+    DATABASE_POOL_SIZE: "10"
+    CACHE_TTL: "600"
+    RATE_LIMIT_ENABLED: "true"
+
+# Staging specific probes
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health
+    port: 8080
+  initialDelaySeconds: 45
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Pod disruption budget enabled for staging
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network policy enabled for staging
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 8080
+
+# Monitoring configuration for staging
+monitoring:
+  enabled: true
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+
+# Security context (production-like)
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Volume mounts for staging
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: logs
+    mountPath: /app/logs
+
+# Volumes for staging
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: logs
+    emptyDir: {}
+
+# Azure Key Vault integration
+azureKeyVault:
+  enabled: true
+  vaultName: "your-keyvault-staging"
+  secrets:
+    - secretName: database-url
+      keyVaultSecretName: shared-app-staging-database-url
+    - secretName: database-password
+      keyVaultSecretName: shared-app-staging-database-password
+    - secretName: jwt-secret
+      keyVaultSecretName: shared-app-staging-jwt-secret
+    - secretName: redis-url
+      keyVaultSecretName: shared-app-staging-redis-url
+    - secretName: api-key
+      keyVaultSecretName: shared-app-staging-api-key
+    - secretName: storage-connection
+      keyVaultSecretName: shared-app-staging-storage-connection
+
+# Staging specific annotations
+podAnnotations:
+  environment: "staging"
+  team: "platform"
+  cost-center: "qa-staging"
+
+# Node selector for staging workloads
+nodeSelector:
+  kubernetes.io/os: linux
+  node-type: standard
+
+# Tolerations for staging
+tolerations:
+  - key: "staging-workload"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Affinity rules for staging
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - shared-app
+        topologyKey: kubernetes.io/hostname

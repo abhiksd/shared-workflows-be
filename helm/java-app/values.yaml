@@ -1,0 +1,126 @@
+# Java Spring Boot Application specific values
+# This file extends the shared-app chart values
+
+# Enable the shared-app dependency
+shared-app:
+  enabled: true
+
+# Override global settings for Java app
+global:
+  applicationName: java-app
+  applicationType: java-springboot
+
+# Java application specific image settings
+image:
+  repository: myregistry.azurecr.io/java-app
+  tag: "latest"
+
+# Service configuration for Java Spring Boot
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# Java Spring Boot specific environment variables
+env:
+  - name: SPRING_PROFILES_ACTIVE
+    value: "default"
+  - name: SERVER_PORT
+    value: "8080"
+  - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+    value: "health,info,prometheus"
+  - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+    value: "always"
+
+# Health check endpoints for Spring Boot
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+startupProbe:
+  enabled: true
+  httpGet:
+    path: /actuator/health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+# Resource requirements for Java application
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+# JVM specific configuration
+jvm:
+  opts: "-Xms512m -Xmx1536m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+# ConfigMap data specific to Java application
+configMap:
+  enabled: true
+  data:
+    # Spring Boot specific configuration
+    SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "20"
+    SPRING_CACHE_TYPE: "redis"
+    LOGGING_LEVEL_ORG_SPRINGFRAMEWORK: "INFO"
+    LOGGING_LEVEL_COM_YOURCOMPANY: "DEBUG"
+
+# Volume mounts for Java application
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: logs
+    mountPath: /app/logs
+  - name: config
+    mountPath: /app/config
+    readOnly: true
+
+# Volumes for Java application
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: logs
+    emptyDir: {}
+  - name: config
+    configMap:
+      name: java-app-config
+
+# Monitoring specific to Java/Spring Boot
+monitoring:
+  enabled: true
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+
+# Java application specific tests
+tests:
+  enabled: true
+  image:
+    repository: myregistry.azurecr.io/java-app-tests
+    tag: "latest"
+  command:
+    - "/bin/sh"
+    - "-c"
+    - "curl -f http://java-app:8080/actuator/health || exit 1"

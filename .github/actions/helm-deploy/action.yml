@@ -29,6 +29,10 @@ inputs:
   aks_resource_group:
     description: 'AKS resource group'
     required: true
+  keyvault_secrets_available:
+    description: 'Whether Key Vault secrets are available'
+    required: false
+    default: 'false'
 
 outputs:
   deployment_status:
@@ -62,117 +66,121 @@ runs:
       shell: bash
       id: namespace
 
-    - name: Prepare Helm values
+    - name: Setup Key Vault secrets as Kubernetes secrets
+      id: keyvault-secrets
+      if: inputs.keyvault_secrets_available == 'true'
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        SECRET_NAME="${{ inputs.application_name }}-keyvault-secrets"
+        
+        echo "Setting up Key Vault secrets in Kubernetes..."
+        
+        # Check if secrets file exists
+        if [[ -f "/tmp/keyvault-secrets/secrets.yaml" ]]; then
+          echo "Found Key Vault secrets file"
+          
+          # Create Kubernetes secret from Key Vault secrets
+          kubectl create secret generic ${SECRET_NAME} \
+            --namespace=${NAMESPACE} \
+            --from-env-file=/tmp/keyvault-secrets/secrets.env \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Label the secret
+          kubectl label secret ${SECRET_NAME} \
+            --namespace=${NAMESPACE} \
+            app.kubernetes.io/managed-by=helm \
+            environment=${{ inputs.environment }} \
+            source=azure-keyvault --overwrite
+          
+          echo "secret_created=true" >> $GITHUB_OUTPUT
+          echo "secret_name=${SECRET_NAME}" >> $GITHUB_OUTPUT
+        else
+          echo "No Key Vault secrets found"
+          echo "secret_created=false" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
+    - name: Prepare environment-specific Helm values
       id: values
       run: |
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
-        VALUES_FILE="values-${{ inputs.environment }}.yaml"
+        ENVIRONMENT="${{ inputs.environment }}"
         
-        # Create environment-specific values file
-        cat > ${VALUES_FILE} << EOF
-        # Environment-specific values for ${{ inputs.environment }}
+        # Determine values file to use
+        BASE_VALUES_FILE="${{ inputs.helm_chart_path }}/values.yaml"
+        ENV_VALUES_FILE="${{ inputs.helm_chart_path }}/values-${ENVIRONMENT}.yaml"
+        
+        # Check if environment-specific values file exists
+        if [[ -f "${ENV_VALUES_FILE}" ]]; then
+          echo "Using environment-specific values file: ${ENV_VALUES_FILE}"
+          VALUES_FILES="-f ${BASE_VALUES_FILE} -f ${ENV_VALUES_FILE}"
+        else
+          echo "Environment-specific values file not found, using base values: ${BASE_VALUES_FILE}"
+          VALUES_FILES="-f ${BASE_VALUES_FILE}"
+        fi
+        
+        echo "values_files=${VALUES_FILES}" >> $GITHUB_OUTPUT
+        
+        # Create runtime values override file
+        RUNTIME_VALUES="values-runtime-${ENVIRONMENT}.yaml"
+        
+        cat > ${RUNTIME_VALUES} << EOF
+        # Runtime values for ${{ inputs.environment }}
         global:
-          environment: ${{ inputs.environment }}
+          environment: ${ENVIRONMENT}
           applicationName: ${{ inputs.application_name }}
           applicationType: ${{ inputs.application_type }}
           
         image:
           repository: ${{ inputs.registry }}/${{ inputs.application_name }}
           tag: ${{ inputs.image_tag }}
-          pullPolicy: Always
+          pullPolicy: $([ "${ENVIRONMENT}" = "production" ] && echo "IfNotPresent" || echo "Always")
           
         nameOverride: ${{ inputs.application_name }}
-        fullnameOverride: ${{ inputs.application_name }}-${{ inputs.environment }}
+        fullnameOverride: ${{ inputs.application_name }}-${ENVIRONMENT}
         
-        # Environment-specific configuration
-        replicaCount: $([ "${{ inputs.environment }}" = "production" ] && echo "3" || echo "1")
-        
-        resources:
-          limits:
-            cpu: $([ "${{ inputs.environment }}" = "production" ] && echo "1000m" || echo "500m")
-            memory: $([ "${{ inputs.environment }}" = "production" ] && echo "2Gi" || echo "1Gi")
-          requests:
-            cpu: $([ "${{ inputs.environment }}" = "production" ] && echo "500m" || echo "200m")
-            memory: $([ "${{ inputs.environment }}" = "production" ] && echo "1Gi" || echo "512Mi")
-            
-        service:
-          type: ClusterIP
-          port: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "8080" || echo "3000")
-          
-        ingress:
-          enabled: true
-          className: nginx
-          annotations:
-            nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-            cert-manager.io/cluster-issuer: "letsencrypt-prod"
-          hosts:
-            - host: ${{ inputs.application_name }}-${{ inputs.environment }}.yourdomain.com
-              paths:
-                - path: /
-                  pathType: Prefix
-          tls:
-            - secretName: ${{ inputs.application_name }}-${{ inputs.environment }}-tls
-              hosts:
-                - ${{ inputs.application_name }}-${{ inputs.environment }}.yourdomain.com
-                
-        # Application-specific configuration
+        # Environment-specific overrides
         env:
           - name: ENVIRONMENT
-            value: ${{ inputs.environment }}
+            value: ${ENVIRONMENT}
           - name: APPLICATION_NAME
             value: ${{ inputs.application_name }}
           - name: BUILD_VERSION
             value: ${{ inputs.image_tag }}
-            
-        # Health checks
-        livenessProbe:
-          httpGet:
-            path: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "/actuator/health" || echo "/health")
-            port: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "8080" || echo "3000")
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-          
-        readinessProbe:
-          httpGet:
-            path: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "/actuator/health" || echo "/health")
-            port: $([ "${{ inputs.application_type }}" = "java-springboot" ] && echo "8080" || echo "3000")
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-          
-        # Security context
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          fsGroup: 2000
-          
-        podSecurityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          fsGroup: 2000
-          
-        # Network policies
-        networkPolicy:
-          enabled: true
-          
-        # Pod disruption budget
-        podDisruptionBudget:
-          enabled: $([ "${{ inputs.environment }}" = "production" ] && echo "true" || echo "false")
-          minAvailable: $([ "${{ inputs.environment }}" = "production" ] && echo "1" || echo "0")
+          - name: NAMESPACE
+            value: ${NAMESPACE}
         EOF
         
-        echo "values_file=${VALUES_FILE}" >> $GITHUB_OUTPUT
-        echo "Generated values file: ${VALUES_FILE}"
-        cat ${VALUES_FILE}
+        # Add Key Vault secret reference if available
+        if [[ "${{ steps.keyvault-secrets.outputs.secret_created }}" == "true" ]]; then
+          cat >> ${RUNTIME_VALUES} << EOF
+        
+        # Key Vault secrets integration
+        envFrom:
+          - secretRef:
+              name: ${{ steps.keyvault-secrets.outputs.secret_name }}
+        
+        # Additional secret volume mounts if needed
+        extraSecretMounts:
+          - name: keyvault-secrets
+            secretName: ${{ steps.keyvault-secrets.outputs.secret_name }}
+            mountPath: /etc/secrets
+            readOnly: true
+        EOF
+        fi
+        
+        VALUES_FILES="${VALUES_FILES} -f ${RUNTIME_VALUES}"
+        echo "values_files=${VALUES_FILES}" >> $GITHUB_OUTPUT
+        echo "runtime_values=${RUNTIME_VALUES}" >> $GITHUB_OUTPUT
+        
+        echo "Generated runtime values file:"
+        cat ${RUNTIME_VALUES}
       shell: bash
 
     - name: Lint Helm chart
       run: |
-        helm lint ${{ inputs.helm_chart_path }} -f ${{ steps.values.outputs.values_file }}
+        echo "Linting Helm chart with values: ${{ steps.values.outputs.values_files }}"
+        helm lint ${{ inputs.helm_chart_path }} ${{ steps.values.outputs.values_files }}
       shell: bash
 
     - name: Deploy with Helm
@@ -182,26 +190,30 @@ runs:
         RELEASE_NAME="${{ inputs.application_name }}-${{ inputs.environment }}"
         
         echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE}"
+        echo "Using values files: ${{ steps.values.outputs.values_files }}"
         
         # Check if release exists
         if helm list -n ${NAMESPACE} | grep -q ${RELEASE_NAME}; then
           echo "Upgrading existing release..."
           helm upgrade ${RELEASE_NAME} ${{ inputs.helm_chart_path }} \
             --namespace ${NAMESPACE} \
-            --values ${{ steps.values.outputs.values_file }} \
+            ${{ steps.values.outputs.values_files }} \
             --set image.tag=${{ inputs.image_tag }} \
             --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }} \
+            --set global.environment=${{ inputs.environment }} \
             --version ${{ inputs.helm_version }} \
             --wait \
             --timeout 600s \
-            --atomic
+            --atomic \
+            --history-max 10
         else
           echo "Installing new release..."
           helm install ${RELEASE_NAME} ${{ inputs.helm_chart_path }} \
             --namespace ${NAMESPACE} \
-            --values ${{ steps.values.outputs.values_file }} \
+            ${{ steps.values.outputs.values_files }} \
             --set image.tag=${{ inputs.image_tag }} \
             --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }} \
+            --set global.environment=${{ inputs.environment }} \
             --version ${{ inputs.helm_version }} \
             --wait \
             --timeout 600s \
@@ -212,28 +224,60 @@ runs:
         echo "status=success" >> $GITHUB_OUTPUT
         
         # Get deployment status
+        echo "=== Deployment Status ==="
         kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }}
         kubectl get svc -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }}
+        kubectl get ingress -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }} || echo "No ingress found"
         
         echo "Deployment completed successfully!"
       shell: bash
 
-    - name: Run deployment tests
+    - name: Run post-deployment health checks
       run: |
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
         RELEASE_NAME="${{ steps.deploy.outputs.release_name }}"
         
-        # Run Helm test if tests exist
-        if helm test ${RELEASE_NAME} --namespace ${NAMESPACE} --timeout 300s; then
-          echo "Helm tests passed"
-        else
-          echo "Helm tests failed or not available"
-        fi
+        echo "Running post-deployment health checks..."
         
         # Wait for deployment to be ready
         kubectl wait --for=condition=available deployment/${RELEASE_NAME} -n ${NAMESPACE} --timeout=300s
         
-        echo "Deployment is ready and healthy"
+        # Check pod status
+        echo "=== Pod Status ==="
+        kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }} -o wide
+        
+        # Check service endpoints
+        echo "=== Service Endpoints ==="
+        kubectl get endpoints -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }}
+        
+        # Run Helm test if tests exist
+        if helm test ${RELEASE_NAME} --namespace ${NAMESPACE} --timeout 300s; then
+          echo "✅ Helm tests passed"
+        else
+          echo "⚠️  Helm tests failed or not available"
+        fi
+        
+        echo "✅ Health checks completed"
+      shell: bash
+
+    - name: Verify Key Vault integration
+      if: inputs.keyvault_secrets_available == 'true'
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        
+        echo "Verifying Key Vault secret integration..."
+        
+        # Check if secret exists
+        if kubectl get secret ${{ steps.keyvault-secrets.outputs.secret_name }} -n ${NAMESPACE} >/dev/null 2>&1; then
+          echo "✅ Key Vault secret successfully created in Kubernetes"
+          
+          # List secret keys (without values for security)
+          echo "Secret contains the following keys:"
+          kubectl get secret ${{ steps.keyvault-secrets.outputs.secret_name }} -n ${NAMESPACE} -o jsonpath='{.data}' | jq -r 'keys[]' || echo "Unable to list keys"
+        else
+          echo "❌ Key Vault secret not found in Kubernetes"
+          exit 1
+        fi
       shell: bash
 
     - name: Generate deployment summary
@@ -250,15 +294,44 @@ runs:
         **Helm Chart Version:** ${{ inputs.helm_version }}
         **Namespace:** ${NAMESPACE}
         **Release Name:** ${RELEASE_NAME}
+        **Key Vault Integration:** ${{ inputs.keyvault_secrets_available }}
         
-        ### Deployment Status
+        ### 📊 Deployment Status
         \`\`\`
         $(kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }})
         \`\`\`
         
-        ### Service Information
+        ### 🌐 Service Information
         \`\`\`
         $(kubectl get svc -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }})
         \`\`\`
+        
+        ### 🔗 Ingress Information
+        \`\`\`
+        $(kubectl get ingress -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }} 2>/dev/null || echo "No ingress configured")
+        \`\`\`
+        
+        ### 🔐 Secrets Status
+        $(if [[ "${{ inputs.keyvault_secrets_available }}" == "true" ]]; then
+          echo "✅ Azure Key Vault secrets integrated"
+          echo "\`\`\`"
+          echo "Secret Name: ${{ steps.keyvault-secrets.outputs.secret_name }}"
+          echo "Namespace: ${NAMESPACE}"
+          echo "\`\`\`"
+        else
+          echo "ℹ️ No Key Vault secrets configured"
+        fi)
+        
+        ### 📈 Helm Release Status
+        \`\`\`
+        $(helm status ${RELEASE_NAME} -n ${NAMESPACE} --show-desc)
+        \`\`\`
         EOF
+      shell: bash
+
+    - name: Cleanup temporary files
+      run: |
+        # Clean up temporary values files
+        rm -f values-runtime-*.yaml
+        echo "Temporary files cleaned up"
       shell: bash

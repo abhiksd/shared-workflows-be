@@ -1,0 +1,55 @@
+# Development environment values for Node.js application
+
+shared-app:
+  enabled: true
+
+global:
+  environment: dev
+  applicationName: nodejs-app
+  applicationType: nodejs
+
+# Development specific settings
+image:
+  tag: "dev-latest"
+  pullPolicy: Always
+
+# Lower resources for development
+resources:
+  limits:
+    cpu: 300m
+    memory: 512Mi
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+# Development specific environment variables
+env:
+  - name: NODE_ENV
+    value: "development"
+  - name: LOG_LEVEL
+    value: "debug"
+  - name: DEBUG
+    value: "*"
+  - name: ENABLE_HOT_RELOAD
+    value: "true"
+
+# Relaxed health checks for development
+livenessProbe:
+  initialDelaySeconds: 60
+  periodSeconds: 60
+  failureThreshold: 5
+
+readinessProbe:
+  initialDelaySeconds: 20
+  periodSeconds: 15
+  failureThreshold: 5
+
+# Azure Key Vault for development
+azureKeyVault:
+  enabled: true
+  vaultName: "your-keyvault-dev"
+  secrets:
+    - secretName: database-url
+      keyVaultSecretName: nodejs-app-dev-database-url
+    - secretName: api-key
+      keyVaultSecretName: nodejs-app-dev-api-key

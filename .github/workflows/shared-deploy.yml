@@ -3,10 +3,6 @@ name: Shared AKS Deployment Workflow
 on:
   workflow_call:
     inputs:
-      environment:
-        description: 'Target environment (dev, staging, production)'
-        required: true
-        type: string
       application_name:
         description: 'Application name'
         required: true
@@ -35,6 +31,11 @@ on:
         required: false
         type: boolean
         default: false
+      keyvault_name:
+        description: 'Azure Key Vault name for secrets'
+        required: false
+        type: string
+        default: ''
     secrets:
       AZURE_CREDENTIALS:
         description: 'Azure Service Principal credentials'
@@ -48,24 +49,96 @@ on:
       ACR_PASSWORD:
         description: 'Azure Container Registry password'
         required: true
-      AKS_CLUSTER_NAME:
-        description: 'AKS cluster name'
-        required: true
-      AKS_RESOURCE_GROUP:
-        description: 'AKS resource group'
-        required: true
+      AKS_CLUSTER_NAME_DEV:
+        description: 'AKS cluster name for dev environment'
+        required: false
+      AKS_RESOURCE_GROUP_DEV:
+        description: 'AKS resource group for dev environment'
+        required: false
+      AKS_CLUSTER_NAME_STAGING:
+        description: 'AKS cluster name for staging environment'
+        required: false
+      AKS_RESOURCE_GROUP_STAGING:
+        description: 'AKS resource group for staging environment'
+        required: false
+      AKS_CLUSTER_NAME_PROD:
+        description: 'AKS cluster name for production environment'
+        required: false
+      AKS_RESOURCE_GROUP_PROD:
+        description: 'AKS resource group for production environment'
+        required: false
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
   
 jobs:
+  # Environment determination job
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env-check.outputs.environment }}
+      should_deploy: ${{ steps.env-check.outputs.should_deploy }}
+      aks_cluster_name: ${{ steps.env-check.outputs.aks_cluster_name }}
+      aks_resource_group: ${{ steps.env-check.outputs.aks_resource_group }}
+    steps:
+      - name: Determine environment and deployment eligibility
+        id: env-check
+        run: |
+          echo "Branch: ${{ github.ref }}"
+          echo "Event: ${{ github.event_name }}"
+          
+          # Initialize variables
+          ENVIRONMENT=""
+          SHOULD_DEPLOY="false"
+          AKS_CLUSTER_NAME=""
+          AKS_RESOURCE_GROUP=""
+          
+          # Development environment logic
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            ENVIRONMENT="dev"
+            SHOULD_DEPLOY="true"
+            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_DEV }}"
+            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_DEV }}"
+          # Staging environment logic  
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ENVIRONMENT="staging"
+            SHOULD_DEPLOY="true"
+            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_STAGING }}"
+            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_STAGING }}"
+          # Production environment logic
+          elif [[ "${{ github.ref }}" == refs/heads/release/* ]] || [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            ENVIRONMENT="production"
+            SHOULD_DEPLOY="true"
+            AKS_CLUSTER_NAME="${{ secrets.AKS_CLUSTER_NAME_PROD }}"
+            AKS_RESOURCE_GROUP="${{ secrets.AKS_RESOURCE_GROUP_PROD }}"
+          # Manual workflow dispatch
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # For manual triggers, we need to determine environment from the calling workflow
+            # This will be passed through the workflow_call context
+            echo "Manual workflow dispatch detected. Environment will be determined by calling workflow."
+            SHOULD_DEPLOY="true"
+          fi
+          
+          echo "Determined environment: ${ENVIRONMENT}"
+          echo "Should deploy: ${SHOULD_DEPLOY}"
+          echo "AKS Cluster: ${AKS_CLUSTER_NAME}"
+          echo "AKS Resource Group: ${AKS_RESOURCE_GROUP}"
+          
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "should_deploy=${SHOULD_DEPLOY}" >> $GITHUB_OUTPUT
+          echo "aks_cluster_name=${AKS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
+          echo "aks_resource_group=${AKS_RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+
   setup:
     runs-on: ubuntu-latest
+    needs: determine-environment
+    if: needs.determine-environment.outputs.should_deploy == 'true'
     outputs:
       version: ${{ steps.version.outputs.version }}
       image_tag: ${{ steps.version.outputs.image_tag }}
       helm_version: ${{ steps.version.outputs.helm_version }}
       should_deploy: ${{ steps.changes.outputs.should_deploy }}
+      environment: ${{ needs.determine-environment.outputs.environment }}
     steps:
       - name: Clean workspace
         uses: ./.github/actions/workspace-cleanup
@@ -82,7 +155,7 @@ jobs:
         id: version
         uses: ./.github/actions/version-strategy
         with:
-          environment: ${{ inputs.environment }}
+          environment: ${{ needs.determine-environment.outputs.environment }}
           application_name: ${{ inputs.application_name }}
 
       - name: Check for changes
@@ -93,10 +166,115 @@ jobs:
           build_context: ${{ inputs.build_context }}
           force_deploy: ${{ inputs.force_deploy }}
 
+  # Azure Key Vault secrets retrieval
+  fetch-secrets:
+    runs-on: ubuntu-latest
+    needs: [determine-environment, setup]
+    if: needs.setup.outputs.should_deploy == 'true' && inputs.keyvault_name != ''
+    outputs:
+      secrets_retrieved: ${{ steps.keyvault.outputs.secrets_retrieved }}
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Fetch secrets from Azure Key Vault
+        id: keyvault
+        run: |
+          KEYVAULT_NAME="${{ inputs.keyvault_name }}"
+          ENVIRONMENT="${{ needs.setup.outputs.environment }}"
+          
+          if [[ -z "${KEYVAULT_NAME}" ]]; then
+            echo "No Key Vault specified, skipping secret retrieval"
+            echo "secrets_retrieved=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Fetching secrets from Key Vault: ${KEYVAULT_NAME}"
+          
+          # Create secrets directory
+          mkdir -p /tmp/keyvault-secrets
+          
+          # Fetch application-specific secrets
+          SECRET_NAMES=(
+            "${{ inputs.application_name }}-${ENVIRONMENT}-database-url"
+            "${{ inputs.application_name }}-${ENVIRONMENT}-database-password"
+            "${{ inputs.application_name }}-${ENVIRONMENT}-jwt-secret"
+            "${{ inputs.application_name }}-${ENVIRONMENT}-api-key"
+            "${{ inputs.application_name }}-${ENVIRONMENT}-redis-url"
+            "${{ inputs.application_name }}-${ENVIRONMENT}-storage-connection"
+          )
+          
+          # Fetch common secrets
+          COMMON_SECRET_NAMES=(
+            "common-${ENVIRONMENT}-monitoring-api-key"
+            "common-${ENVIRONMENT}-logging-endpoint"
+            "common-${ENVIRONMENT}-external-service-token"
+          )
+          
+          # Combine arrays
+          ALL_SECRETS=("${SECRET_NAMES[@]}" "${COMMON_SECRET_NAMES[@]}")
+          
+          SECRETS_FILE="/tmp/keyvault-secrets/secrets.env"
+          SECRETS_YAML="/tmp/keyvault-secrets/secrets.yaml"
+          
+          echo "# Generated secrets from Azure Key Vault" > ${SECRETS_FILE}
+          echo "# Generated secrets from Azure Key Vault" > ${SECRETS_YAML}
+          echo "secrets:" >> ${SECRETS_YAML}
+          
+          SECRETS_FOUND=0
+          
+          for secret_name in "${ALL_SECRETS[@]}"; do
+            echo "Checking secret: ${secret_name}"
+            
+            # Try to fetch the secret
+            if secret_value=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "${secret_name}" --query "value" --output tsv 2>/dev/null); then
+              if [[ -n "${secret_value}" && "${secret_value}" != "null" ]]; then
+                echo "Found secret: ${secret_name}"
+                
+                # Convert secret name to environment variable format
+                env_var_name=$(echo "${secret_name}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+                
+                # Add to env file
+                echo "${env_var_name}=${secret_value}" >> ${SECRETS_FILE}
+                
+                # Add to YAML file (for Kubernetes secrets)
+                yaml_key=$(echo "${secret_name}" | sed "s/${ENVIRONMENT}-//" | sed "s/${{ inputs.application_name }}-//")
+                echo "  ${yaml_key}: \"${secret_value}\"" >> ${SECRETS_YAML}
+                
+                SECRETS_FOUND=$((SECRETS_FOUND + 1))
+              fi
+            fi
+          done
+          
+          echo "Found ${SECRETS_FOUND} secrets in Key Vault"
+          
+          if [[ ${SECRETS_FOUND} -gt 0 ]]; then
+            echo "secrets_retrieved=true" >> $GITHUB_OUTPUT
+            
+            # Upload secrets as artifacts (encrypted)
+            echo "Uploading secrets as build artifacts..."
+          else
+            echo "secrets_retrieved=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Store the secrets file path for later jobs
+          echo "SECRETS_FILE=${SECRETS_FILE}" >> $GITHUB_ENV
+          echo "SECRETS_YAML=${SECRETS_YAML}" >> $GITHUB_ENV
+
+      - name: Upload secrets artifacts
+        if: steps.keyvault.outputs.secrets_retrieved == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}
+          path: /tmp/keyvault-secrets/
+          retention-days: 1
+
   maven-build:
     runs-on: ubuntu-latest
-    needs: setup
-    if: needs.setup.outputs.should_deploy == 'true' && inputs.application_type == 'java-springboot'
+    needs: [setup, fetch-secrets]
+    if: needs.setup.outputs.should_deploy == 'true' && inputs.application_type == 'java-springboot' && (!cancelled())
     outputs:
       jar_artifact: ${{ steps.maven.outputs.artifact_name }}
       build_version: ${{ steps.maven.outputs.build_version }}
@@ -110,6 +288,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download secrets if available
+        if: needs.fetch-secrets.outputs.secrets_retrieved == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}
+          path: /tmp/keyvault-secrets/
+
       - name: Build Java application with Maven
         id: maven
         uses: ./.github/actions/maven-build
@@ -122,7 +307,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [setup, maven-build]
+    needs: [setup, maven-build, fetch-secrets]
     if: needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
     steps:
       - name: Clean workspace and Docker
@@ -155,9 +340,9 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [setup, build]
+    needs: [determine-environment, setup, build, fetch-secrets]
     if: needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
-    environment: ${{ inputs.environment }}
+    environment: ${{ needs.setup.outputs.environment }}
     steps:
       - name: Clean workspace
         uses: ./.github/actions/workspace-cleanup
@@ -168,6 +353,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download secrets if available
+        if: needs.fetch-secrets.outputs.secrets_retrieved == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}
+          path: /tmp/keyvault-secrets/
+
       - name: Azure Login
         uses: azure/login@v1
         with:
@@ -176,22 +368,23 @@ jobs:
       - name: Deploy to AKS
         uses: ./.github/actions/helm-deploy
         with:
-          environment: ${{ inputs.environment }}
+          environment: ${{ needs.setup.outputs.environment }}
           application_name: ${{ inputs.application_name }}
           application_type: ${{ inputs.application_type }}
           helm_chart_path: ${{ inputs.helm_chart_path }}
           image_tag: ${{ needs.setup.outputs.image_tag }}
           helm_version: ${{ needs.setup.outputs.helm_version }}
           registry: ${{ env.REGISTRY }}
-          aks_cluster_name: ${{ secrets.AKS_CLUSTER_NAME }}
-          aks_resource_group: ${{ secrets.AKS_RESOURCE_GROUP }}
+          aks_cluster_name: ${{ needs.determine-environment.outputs.aks_cluster_name }}
+          aks_resource_group: ${{ needs.determine-environment.outputs.aks_resource_group }}
+          keyvault_secrets_available: ${{ needs.fetch-secrets.outputs.secrets_retrieved }}
 
   create_release:
     runs-on: ubuntu-latest
     needs: [setup, deploy]
     if: |
       needs.setup.outputs.should_deploy == 'true' && 
-      inputs.environment == 'production' && 
+      needs.setup.outputs.environment == 'production' && 
       (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')) &&
       !failure() && !cancelled()
     steps:
@@ -212,7 +405,7 @@ jobs:
 
   cleanup:
     runs-on: ubuntu-latest
-    needs: [setup, maven-build, build, deploy, create_release]
+    needs: [determine-environment, setup, maven-build, build, deploy, create_release, fetch-secrets]
     if: always()
     steps:
       - name: Final comprehensive cleanup
@@ -220,3 +413,30 @@ jobs:
         with:
           cleanup_docker: 'true'
           cleanup_temp: 'true'
+
+      - name: Clean up secrets artifacts
+        if: needs.fetch-secrets.outputs.secrets_retrieved == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              // Delete the secrets artifact for security
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+              });
+              
+              for (const artifact of artifacts.data.artifacts) {
+                if (artifact.name.includes('keyvault-secrets')) {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id,
+                  });
+                  console.log(`Deleted artifact: ${artifact.name}`);
+                }
+              }
+            } catch (error) {
+              console.log(`Failed to clean up artifacts: ${error.message}`);
+            }

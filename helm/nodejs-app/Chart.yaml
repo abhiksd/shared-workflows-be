@@ -1,0 +1,28 @@
+apiVersion: v2
+name: nodejs-app
+description: A Helm chart for Node.js Application
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - nodejs
+  - javascript
+  - microservice
+
+home: https://github.com/your-org/your-repo
+sources:
+  - https://github.com/your-org/your-repo
+
+maintainers:
+  - name: Platform Team
+    email: platform@yourcompany.com
+
+dependencies:
+  - name: shared-app
+    version: "0.1.0"
+    repository: "file://../shared-app"
+    condition: shared-app.enabled
+
+annotations:
+  category: Application

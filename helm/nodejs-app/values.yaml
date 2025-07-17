@@ -1,0 +1,120 @@
+# Node.js Application specific values
+# This file extends the shared-app chart values
+
+# Enable the shared-app dependency
+shared-app:
+  enabled: true
+
+# Override global settings for Node.js app
+global:
+  applicationName: nodejs-app
+  applicationType: nodejs
+
+# Node.js application specific image settings
+image:
+  repository: myregistry.azurecr.io/nodejs-app
+  tag: "latest"
+
+# Service configuration for Node.js
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+# Node.js specific environment variables
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3000"
+  - name: LOG_LEVEL
+    value: "info"
+  - name: ENABLE_METRICS
+    value: "true"
+
+# Health check endpoints for Node.js
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /ready
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+startupProbe:
+  enabled: true
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 30
+
+# Resource requirements for Node.js application
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 512Mi
+
+# ConfigMap data specific to Node.js application
+configMap:
+  enabled: true
+  data:
+    # Node.js specific configuration
+    MAX_CONNECTIONS: "1000"
+    TIMEOUT: "30000"
+    CLUSTER_MODE: "true"
+    CACHE_TTL: "3600"
+
+# Volume mounts for Node.js application
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: logs
+    mountPath: /app/logs
+  - name: uploads
+    mountPath: /app/uploads
+
+# Volumes for Node.js application
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: logs
+    emptyDir: {}
+  - name: uploads
+    emptyDir: {}
+
+# Monitoring specific to Node.js
+monitoring:
+  enabled: true
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+    prometheus.io/path: "/metrics"
+
+# Node.js application specific tests
+tests:
+  enabled: true
+  image:
+    repository: myregistry.azurecr.io/nodejs-app-tests
+    tag: "latest"
+  command:
+    - "/bin/sh"
+    - "-c"
+    - "curl -f http://nodejs-app:3000/health || exit 1"
