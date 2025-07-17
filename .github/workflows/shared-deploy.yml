@@ -168,8 +168,12 @@ jobs:
     needs: [determine-environment, setup]
     if: needs.setup.outputs.should_deploy == 'true' && inputs.keyvault_name != ''
     outputs:
-      secrets_retrieved: ${{ steps.keyvault.outputs.secrets_retrieved }}
+      secrets_retrieved: ${{ steps.fetch-keyvault-secrets.outputs.secrets_retrieved }}
+      secrets_count: ${{ steps.fetch-keyvault-secrets.outputs.secrets_count }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Azure Login with Managed Identity
         uses: azure/login@v2
         with:
@@ -178,91 +182,17 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Fetch secrets from Azure Key Vault
-        id: keyvault
-        run: |
-          KEYVAULT_NAME="${{ inputs.keyvault_name }}"
-          ENVIRONMENT="${{ needs.setup.outputs.environment }}"
-          
-          if [[ -z "${KEYVAULT_NAME}" ]]; then
-            echo "No Key Vault specified, skipping secret retrieval"
-            echo "secrets_retrieved=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "Fetching secrets from Key Vault: ${KEYVAULT_NAME}"
-          
-          # Create secrets directory
-          mkdir -p /tmp/keyvault-secrets
-          
-          # Fetch application-specific secrets
-          SECRET_NAMES=(
-            "${{ inputs.application_name }}-${ENVIRONMENT}-database-url"
-            "${{ inputs.application_name }}-${ENVIRONMENT}-database-password"
-            "${{ inputs.application_name }}-${ENVIRONMENT}-jwt-secret"
-            "${{ inputs.application_name }}-${ENVIRONMENT}-api-key"
-            "${{ inputs.application_name }}-${ENVIRONMENT}-redis-url"
-            "${{ inputs.application_name }}-${ENVIRONMENT}-storage-connection"
-          )
-          
-          # Fetch common secrets
-          COMMON_SECRET_NAMES=(
-            "common-${ENVIRONMENT}-monitoring-api-key"
-            "common-${ENVIRONMENT}-logging-endpoint"
-            "common-${ENVIRONMENT}-external-service-token"
-          )
-          
-          # Combine arrays
-          ALL_SECRETS=("${SECRET_NAMES[@]}" "${COMMON_SECRET_NAMES[@]}")
-          
-          SECRETS_FILE="/tmp/keyvault-secrets/secrets.env"
-          SECRETS_YAML="/tmp/keyvault-secrets/secrets.yaml"
-          
-          echo "# Generated secrets from Azure Key Vault" > ${SECRETS_FILE}
-          echo "# Generated secrets from Azure Key Vault" > ${SECRETS_YAML}
-          echo "secrets:" >> ${SECRETS_YAML}
-          
-          SECRETS_FOUND=0
-          
-          for secret_name in "${ALL_SECRETS[@]}"; do
-            echo "Checking secret: ${secret_name}"
-            
-            # Try to fetch the secret
-            if secret_value=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "${secret_name}" --query "value" --output tsv 2>/dev/null); then
-              if [[ -n "${secret_value}" && "${secret_value}" != "null" ]]; then
-                echo "Found secret: ${secret_name}"
-                
-                # Convert secret name to environment variable format
-                env_var_name=$(echo "${secret_name}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-                
-                # Add to env file
-                echo "${env_var_name}=${secret_value}" >> ${SECRETS_FILE}
-                
-                # Add to YAML file (for Kubernetes secrets)
-                yaml_key=$(echo "${secret_name}" | sed "s/${ENVIRONMENT}-//" | sed "s/${{ inputs.application_name }}-//")
-                echo "  ${yaml_key}: \"${secret_value}\"" >> ${SECRETS_YAML}
-                
-                SECRETS_FOUND=$((SECRETS_FOUND + 1))
-              fi
-            fi
-          done
-          
-          echo "Found ${SECRETS_FOUND} secrets in Key Vault"
-          
-          if [[ ${SECRETS_FOUND} -gt 0 ]]; then
-            echo "secrets_retrieved=true" >> $GITHUB_OUTPUT
-            
-            # Upload secrets as artifacts (encrypted)
-            echo "Uploading secrets as build artifacts..."
-          else
-            echo "secrets_retrieved=false" >> $GITHUB_OUTPUT
-          fi
-          
-          # Store the secrets file path for later jobs
-          echo "SECRETS_FILE=${SECRETS_FILE}" >> $GITHUB_ENV
-          echo "SECRETS_YAML=${SECRETS_YAML}" >> $GITHUB_ENV
+        id: fetch-keyvault-secrets
+        uses: ./.github/actions/fetch-keyvault-secrets
+        with:
+          environment: ${{ needs.setup.outputs.environment }}
+          application_name: ${{ inputs.application_name }}
+          keyvault_name: ${{ inputs.keyvault_name }}
+          output_format: 'both'
+          include_common_secrets: 'true'
 
       - name: Upload secrets artifacts
-        if: steps.keyvault.outputs.secrets_retrieved == 'true'
+        if: steps.fetch-keyvault-secrets.outputs.secrets_retrieved == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: keyvault-secrets-${{ inputs.application_name }}-${{ needs.setup.outputs.environment }}

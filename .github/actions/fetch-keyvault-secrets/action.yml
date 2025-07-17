@@ -1,0 +1,120 @@
+name: 'Fetch Azure Key Vault Secrets'
+description: 'Fetches secrets from Azure Key Vault and prepares them for deployment'
+
+inputs:
+  environment:
+    description: 'Target environment (dev, staging, production)'
+    required: true
+  application_name:
+    description: 'Application name'
+    required: true
+  keyvault_name:
+    description: 'Azure Key Vault name'
+    required: true
+  output_format:
+    description: 'Output format for secrets (env, yaml, both)'
+    required: false
+    default: 'both'
+  secret_types:
+    description: 'Comma-separated list of secret types to fetch'
+    required: false
+    default: 'database-url,database-password,jwt-secret,api-key,redis-url,storage-connection'
+  include_common_secrets:
+    description: 'Include common environment secrets'
+    required: false
+    default: 'true'
+
+outputs:
+  secrets_retrieved:
+    description: 'Whether secrets were successfully retrieved'
+    value: ${{ steps.fetch-secrets.outputs.secrets_retrieved }}
+  secrets_count:
+    description: 'Number of secrets retrieved'
+    value: ${{ steps.fetch-secrets.outputs.secrets_count }}
+  secrets_env_file:
+    description: 'Path to environment file with secrets'
+    value: ${{ steps.fetch-secrets.outputs.secrets_env_file }}
+  secrets_yaml_file:
+    description: 'Path to YAML file with secrets'
+    value: ${{ steps.fetch-secrets.outputs.secrets_yaml_file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Fetch secrets from Azure Key Vault
+      id: fetch-secrets
+      run: |
+        KEYVAULT_NAME="${{ inputs.keyvault_name }}"
+        ENVIRONMENT="${{ inputs.environment }}"
+        APPLICATION_NAME="${{ inputs.application_name }}"
+        
+        echo "Fetching secrets from Key Vault: ${KEYVAULT_NAME}"
+        
+        # Create output directory
+        OUTPUT_DIR="/tmp/keyvault-secrets"
+        mkdir -p "${OUTPUT_DIR}"
+        
+        # Parse secret types
+        IFS=',' read -ra SECRET_TYPES <<< "${{ inputs.secret_types }}"
+        
+        # Build secret names array
+        SECRET_NAMES=()
+        
+        # Add application-specific secrets
+        for secret_type in "${SECRET_TYPES[@]}"; do
+          secret_type=$(echo "$secret_type" | xargs)
+          SECRET_NAMES+=("${APPLICATION_NAME}-${ENVIRONMENT}-${secret_type}")
+        done
+        
+        # Add common secrets if requested
+        if [[ "${{ inputs.include_common_secrets }}" == "true" ]]; then
+          COMMON_SECRET_TYPES=(
+            "monitoring-api-key"
+            "logging-endpoint"
+            "external-service-token"
+          )
+          
+          for secret_type in "${COMMON_SECRET_TYPES[@]}"; do
+            SECRET_NAMES+=("common-${ENVIRONMENT}-${secret_type}")
+          done
+        fi
+        
+        SECRETS_ENV_FILE="${OUTPUT_DIR}/secrets.env"
+        SECRETS_YAML_FILE="${OUTPUT_DIR}/secrets.yaml"
+        
+        echo "# Generated secrets from Azure Key Vault" > "${SECRETS_ENV_FILE}"
+        echo "# Generated secrets from Azure Key Vault" > "${SECRETS_YAML_FILE}"
+        echo "secrets:" >> "${SECRETS_YAML_FILE}"
+        
+        SECRETS_FOUND=0
+        
+        for secret_name in "${SECRET_NAMES[@]}"; do
+          echo "Checking secret: ${secret_name}"
+          
+          if secret_value=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" --name "${secret_name}" --query "value" --output tsv 2>/dev/null); then
+            if [[ -n "${secret_value}" && "${secret_value}" != "null" ]]; then
+              echo "Found secret: ${secret_name}"
+              
+              env_var_name=$(echo "${secret_name}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+              echo "${env_var_name}=${secret_value}" >> "${SECRETS_ENV_FILE}"
+              
+              yaml_key=$(echo "${secret_name}" | sed "s/${ENVIRONMENT}-//" | sed "s/${APPLICATION_NAME}-//")
+              echo "  ${yaml_key}: \"${secret_value}\"" >> "${SECRETS_YAML_FILE}"
+              
+              SECRETS_FOUND=$((SECRETS_FOUND + 1))
+            fi
+          fi
+        done
+        
+        echo "Found ${SECRETS_FOUND} secrets in Key Vault"
+        
+        if [[ ${SECRETS_FOUND} -gt 0 ]]; then
+          echo "secrets_retrieved=true" >> $GITHUB_OUTPUT
+          echo "secrets_count=${SECRETS_FOUND}" >> $GITHUB_OUTPUT
+          echo "secrets_env_file=${SECRETS_ENV_FILE}" >> $GITHUB_OUTPUT
+          echo "secrets_yaml_file=${SECRETS_YAML_FILE}" >> $GITHUB_OUTPUT
+        else
+          echo "secrets_retrieved=false" >> $GITHUB_OUTPUT
+          echo "secrets_count=0" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
