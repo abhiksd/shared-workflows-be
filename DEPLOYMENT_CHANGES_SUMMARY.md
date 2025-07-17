@@ -6,6 +6,7 @@ This document summarizes the comprehensive changes made to the deployment workfl
 1. ✅ **Move all environment check logic from deploy-java-app.yml and deploy-nodejs-app.yml to shared workflow shared-deploy.yml**
 2. ✅ **Add helm values.yml for all environments and use values during each environment**
 3. ✅ **Add Azure Key Vault support for application properties and secrets**
+4. ✅ **Migrate from credential-based to managed identity-based Azure authentication**
 
 ## 🔄 Changes Made
 
@@ -199,23 +200,30 @@ extraSecretMounts:
 
 ## 🔧 Setup Requirements
 
-### Repository Secrets Required
+### Repository Variables Required
 ```
-AZURE_CREDENTIALS
-ACR_LOGIN_SERVER
-ACR_USERNAME
-ACR_PASSWORD
-AKS_CLUSTER_NAME_DEV
-AKS_RESOURCE_GROUP_DEV
-AKS_CLUSTER_NAME_STAGING
-AKS_RESOURCE_GROUP_STAGING
-AKS_CLUSTER_NAME_PROD
-AKS_RESOURCE_GROUP_PROD
+AZURE_CLIENT_ID=<Application ID from Azure AD App Registration>
+AZURE_TENANT_ID=<Your Azure Tenant ID>
+AZURE_SUBSCRIPTION_ID=<Your Azure Subscription ID>
+AZURE_KEYVAULT_NAME=<Key Vault name for secrets (optional)>
 ```
 
-### Repository Variables (Optional)
+### Repository Secrets Required (Reduced for Managed Identity)
 ```
-AZURE_KEYVAULT_NAME - for Key Vault integration
+ACR_LOGIN_SERVER=<your-registry>.azurecr.io
+AKS_CLUSTER_NAME_DEV=<dev-cluster-name>
+AKS_RESOURCE_GROUP_DEV=<dev-resource-group>
+AKS_CLUSTER_NAME_STAGING=<staging-cluster-name>
+AKS_RESOURCE_GROUP_STAGING=<staging-resource-group>
+AKS_CLUSTER_NAME_PROD=<prod-cluster-name>
+AKS_RESOURCE_GROUP_PROD=<prod-resource-group>
+```
+
+### Removed Secrets (Now Using Managed Identity)
+```
+❌ AZURE_CREDENTIALS (Service Principal credentials)
+❌ ACR_USERNAME (Container registry username)
+❌ ACR_PASSWORD (Container registry password)
 ```
 
 ### Azure Key Vault Setup

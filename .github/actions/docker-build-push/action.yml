@@ -20,12 +20,18 @@ inputs:
   registry:
     description: 'Container registry'
     required: true
+  use_managed_identity:
+    description: 'Use managed identity for registry authentication'
+    required: false
+    default: 'true'
   registry_username:
-    description: 'Registry username'
-    required: true
+    description: 'Registry username (deprecated, use managed identity instead)'
+    required: false
+    default: ''
   registry_password:
-    description: 'Registry password'
-    required: true
+    description: 'Registry password (deprecated, use managed identity instead)'
+    required: false
+    default: ''
 
 outputs:
   image_digest:
@@ -43,7 +49,27 @@ runs:
       with:
         platforms: linux/amd64,linux/arm64
 
-    - name: Login to Container Registry
+    - name: Login to Azure Container Registry with Managed Identity
+      if: inputs.use_managed_identity == 'true'
+      run: |
+        echo "Logging into Azure Container Registry using managed identity..."
+        
+        # Get access token using managed identity
+        ACCESS_TOKEN=$(az acr login --name ${{ inputs.registry }} --expose-token --output tsv --query accessToken)
+        
+        if [ -z "$ACCESS_TOKEN" ]; then
+          echo "Failed to get ACR access token"
+          exit 1
+        fi
+        
+        # Login to Docker using the access token
+        echo "$ACCESS_TOKEN" | docker login ${{ inputs.registry }} --username 00000000-0000-0000-0000-000000000000 --password-stdin
+        
+        echo "Successfully logged into ACR with managed identity"
+      shell: bash
+
+    - name: Login to Container Registry with Username/Password
+      if: inputs.use_managed_identity != 'true' && inputs.registry_username != '' && inputs.registry_password != ''
       uses: docker/login-action@v3
       with:
         registry: ${{ inputs.registry }}
@@ -58,6 +84,15 @@ runs:
         tags: |
           type=raw,value=${{ inputs.image_tag }}
           type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.title=${{ inputs.application_name }}
+          org.opencontainers.image.description=Container image for ${{ inputs.application_name }}
+          org.opencontainers.image.vendor=Your Organization
+          org.opencontainers.image.version=${{ inputs.image_tag }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.created=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          azure.workload.identity/use=true
 
     - name: Set up build cache
       id: cache
@@ -131,6 +166,12 @@ runs:
         IMAGE_URL="${{ inputs.registry }}/${{ inputs.application_name }}:${{ inputs.image_tag }}"
         echo "image_url=${IMAGE_URL}" >> $GITHUB_OUTPUT
         echo "Built and pushed image: ${IMAGE_URL}"
+        
+        # Verify image exists in registry
+        if ${{ inputs.use_managed_identity == 'true' }}; then
+          echo "Verifying image in ACR using managed identity..."
+          az acr repository show --name $(echo "${{ inputs.registry }}" | cut -d'.' -f1) --image "${{ inputs.application_name }}:${{ inputs.image_tag }}" --output table || echo "Image verification failed"
+        fi
       shell: bash
 
     - name: Generate SBOM
@@ -145,4 +186,20 @@ runs:
       with:
         name: ${{ inputs.application_name }}-sbom
         path: "${{ inputs.application_name }}-sbom.spdx.json"
+        retention-days: 30
+
+    - name: Security scan with Trivy
+      if: inputs.use_managed_identity == 'true'
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ steps.outputs.outputs.image_url }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      if: inputs.use_managed_identity == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.application_name }}-security-scan
+        path: 'trivy-results.sarif'
         retention-days: 30

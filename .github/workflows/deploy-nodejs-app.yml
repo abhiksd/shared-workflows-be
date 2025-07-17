@@ -25,6 +25,11 @@ on:
         type: boolean
         default: false
 
+# Grant permissions for managed identity
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     uses: ./.github/workflows/shared-deploy.yml
@@ -37,10 +42,7 @@ jobs:
       force_deploy: ${{ github.event.inputs.force_deploy == 'true' }}
       keyvault_name: ${{ vars.AZURE_KEYVAULT_NAME || '' }}
     secrets:
-      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
       ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
-      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
       AKS_CLUSTER_NAME_DEV: ${{ secrets.AKS_CLUSTER_NAME_DEV }}
       AKS_RESOURCE_GROUP_DEV: ${{ secrets.AKS_RESOURCE_GROUP_DEV }}
       AKS_CLUSTER_NAME_STAGING: ${{ secrets.AKS_CLUSTER_NAME_STAGING }}

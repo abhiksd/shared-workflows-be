@@ -33,6 +33,10 @@ inputs:
     description: 'Whether Key Vault secrets are available'
     required: false
     default: 'false'
+  use_managed_identity:
+    description: 'Use managed identity for Azure authentication'
+    required: false
+    default: 'true'
 
 outputs:
   deployment_status:
@@ -51,10 +55,11 @@ runs:
         version: '3.12.0'
 
     - name: Get AKS credentials
-      uses: azure/aks-set-context@v3
+      uses: azure/aks-set-context@v4
       with:
         resource-group: ${{ inputs.aks_resource_group }}
         cluster-name: ${{ inputs.aks_cluster_name }}
+        use-kubelogin: true
 
     - name: Create namespace if not exists
       run: |
@@ -149,6 +154,14 @@ runs:
             value: ${{ inputs.image_tag }}
           - name: NAMESPACE
             value: ${NAMESPACE}
+        
+        # Azure Workload Identity configuration
+        serviceAccount:
+          annotations:
+            azure.workload.identity/client-id: ${{ vars.AZURE_CLIENT_ID }}
+        
+        podLabels:
+          azure.workload.identity/use: "true"
         EOF
         
         # Add Key Vault secret reference if available
@@ -201,6 +214,7 @@ runs:
             --set image.tag=${{ inputs.image_tag }} \
             --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }} \
             --set global.environment=${{ inputs.environment }} \
+            --set serviceAccount.annotations."azure\.workload\.identity/client-id"="${{ vars.AZURE_CLIENT_ID }}" \
             --version ${{ inputs.helm_version }} \
             --wait \
             --timeout 600s \
@@ -214,6 +228,7 @@ runs:
             --set image.tag=${{ inputs.image_tag }} \
             --set image.repository=${{ inputs.registry }}/${{ inputs.application_name }} \
             --set global.environment=${{ inputs.environment }} \
+            --set serviceAccount.annotations."azure\.workload\.identity/client-id"="${{ vars.AZURE_CLIENT_ID }}" \
             --version ${{ inputs.helm_version }} \
             --wait \
             --timeout 600s \
@@ -250,6 +265,10 @@ runs:
         echo "=== Service Endpoints ==="
         kubectl get endpoints -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }}
         
+        # Verify Azure Workload Identity configuration
+        echo "=== Azure Workload Identity Status ==="
+        kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }} -o jsonpath='{.items[0].metadata.labels.azure\.workload\.identity/use}' || echo "Workload Identity not configured"
+        
         # Run Helm test if tests exist
         if helm test ${RELEASE_NAME} --namespace ${NAMESPACE} --timeout 300s; then
           echo "✅ Helm tests passed"
@@ -280,6 +299,31 @@ runs:
         fi
       shell: bash
 
+    - name: Verify Azure Workload Identity integration
+      if: inputs.use_managed_identity == 'true'
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        
+        echo "Verifying Azure Workload Identity integration..."
+        
+        # Check service account annotations
+        if kubectl get serviceaccount ${{ inputs.application_name }}-${{ inputs.environment }} -n ${NAMESPACE} -o jsonpath='{.metadata.annotations.azure\.workload\.identity/client-id}' | grep -q "${{ vars.AZURE_CLIENT_ID }}"; then
+          echo "✅ Service account correctly configured with Workload Identity"
+        else
+          echo "⚠️  Service account may not be correctly configured for Workload Identity"
+        fi
+        
+        # Check pod labels
+        POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }} -o jsonpath='{.items[0].metadata.name}')
+        if [[ -n "${POD_NAME}" ]]; then
+          if kubectl get pod ${POD_NAME} -n ${NAMESPACE} -o jsonpath='{.metadata.labels.azure\.workload\.identity/use}' | grep -q "true"; then
+            echo "✅ Pod correctly labeled for Workload Identity"
+          else
+            echo "⚠️  Pod may not be correctly labeled for Workload Identity"
+          fi
+        fi
+      shell: bash
+
     - name: Generate deployment summary
       run: |
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
@@ -295,6 +339,7 @@ runs:
         **Namespace:** ${NAMESPACE}
         **Release Name:** ${RELEASE_NAME}
         **Key Vault Integration:** ${{ inputs.keyvault_secrets_available }}
+        **Managed Identity:** ${{ inputs.use_managed_identity }}
         
         ### 📊 Deployment Status
         \`\`\`
@@ -311,7 +356,7 @@ runs:
         $(kubectl get ingress -n ${NAMESPACE} -l app.kubernetes.io/name=${{ inputs.application_name }} 2>/dev/null || echo "No ingress configured")
         \`\`\`
         
-        ### 🔐 Secrets Status
+        ### 🔐 Security Configuration
         $(if [[ "${{ inputs.keyvault_secrets_available }}" == "true" ]]; then
           echo "✅ Azure Key Vault secrets integrated"
           echo "\`\`\`"
@@ -320,6 +365,16 @@ runs:
           echo "\`\`\`"
         else
           echo "ℹ️ No Key Vault secrets configured"
+        fi)
+        
+        $(if [[ "${{ inputs.use_managed_identity }}" == "true" ]]; then
+          echo "✅ Azure Workload Identity enabled"
+          echo "\`\`\`"
+          echo "Client ID: ${{ vars.AZURE_CLIENT_ID }}"
+          echo "Service Account: ${{ inputs.application_name }}-${{ inputs.environment }}"
+          echo "\`\`\`"
+        else
+          echo "ℹ️ Managed Identity not configured"
         fi)
         
         ### 📈 Helm Release Status
