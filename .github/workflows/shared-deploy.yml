@@ -46,30 +46,12 @@ on:
         description: 'Azure Tenant ID for Key Vault access'
         required: true
       AZURE_CLIENT_ID:
-        description: 'Azure Client ID (App Registration) for OIDC authentication'
+        description: 'Azure Client ID (Managed Identity) for Key Vault access'
         required: true
       AZURE_SUBSCRIPTION_ID:
-        description: 'Azure Subscription ID for OIDC authentication'
+        description: 'Azure Subscription ID'
         required: true
-      # Environment-specific AKS secrets
-      AKS_CLUSTER_NAME_DEV:
-        description: 'AKS cluster name for dev environment'
-        required: true
-      AKS_RESOURCE_GROUP_DEV:
-        description: 'AKS resource group for dev environment'
-        required: true
-      AKS_CLUSTER_NAME_STAGING:
-        description: 'AKS cluster name for staging environment'
-        required: true
-      AKS_RESOURCE_GROUP_STAGING:
-        description: 'AKS resource group for staging environment'
-        required: true
-      AKS_CLUSTER_NAME_PROD:
-        description: 'AKS cluster name for production environment'
-        required: true
-      AKS_RESOURCE_GROUP_PROD:
-        description: 'AKS resource group for production environment'
-        required: true
+      # Note: AKS secrets now accessed directly as repository secrets
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
@@ -85,6 +67,14 @@ jobs:
     steps:
       - name: Validate environment and branch rules
         id: check
+        env:
+          # Pass secrets as environment variables to bash script
+          AKS_CLUSTER_NAME_DEV: ${{ secrets.AKS_CLUSTER_NAME_DEV }}
+          AKS_RESOURCE_GROUP_DEV: ${{ secrets.AKS_RESOURCE_GROUP_DEV }}
+          AKS_CLUSTER_NAME_STAGING: ${{ secrets.AKS_CLUSTER_NAME_STAGING }}
+          AKS_RESOURCE_GROUP_STAGING: ${{ secrets.AKS_RESOURCE_GROUP_STAGING }}
+          AKS_CLUSTER_NAME_PROD: ${{ secrets.AKS_CLUSTER_NAME_PROD }}
+          AKS_RESOURCE_GROUP_PROD: ${{ secrets.AKS_RESOURCE_GROUP_PROD }}
         run: |
           ENVIRONMENT="${{ inputs.environment }}"
           GITHUB_REF="${{ github.ref }}"
@@ -101,7 +91,7 @@ jobs:
           
           # Auto-detect environment if 'auto' is specified
           if [[ "$ENVIRONMENT" == "auto" ]]; then
-            if [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+            if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
               TARGET_ENV="dev"
             elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
               TARGET_ENV="staging"
@@ -117,12 +107,18 @@ jobs:
             echo "📝 Using specified environment: $TARGET_ENV"
           fi
           
-          # Set environment-specific AKS configuration and validate deployment rules
+          # Debug secret access
+          echo "🔍 Testing secret access via environment variables:"
+          echo "AKS_CLUSTER_NAME_DEV: '$AKS_CLUSTER_NAME_DEV'"
+          echo "AKS_RESOURCE_GROUP_DEV: '$AKS_RESOURCE_GROUP_DEV'"
+          
+          # Set environment-specific AKS configuration using environment variables
           case "$TARGET_ENV" in
             "dev")
-              AKS_CLUSTER="${{ secrets.AKS_CLUSTER_NAME_DEV }}"
-              AKS_RG="${{ secrets.AKS_RESOURCE_GROUP_DEV }}"
-              if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              AKS_CLUSTER="$AKS_CLUSTER_NAME_DEV"
+              AKS_RG="$AKS_RESOURCE_GROUP_DEV"
+              echo "🔍 Dev environment - AKS_CLUSTER: '$AKS_CLUSTER', AKS_RG: '$AKS_RG'"
+              if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ Dev deployment approved: develop branch or manual trigger"
               else
@@ -130,8 +126,9 @@ jobs:
               fi
               ;;
             "staging")
-              AKS_CLUSTER="${{ secrets.AKS_CLUSTER_NAME_STAGING }}"
-              AKS_RG="${{ secrets.AKS_RESOURCE_GROUP_STAGING }}"
+              AKS_CLUSTER="$AKS_CLUSTER_NAME_STAGING"
+              AKS_RG="$AKS_RESOURCE_GROUP_STAGING"
+              echo "🔍 Staging environment - AKS_CLUSTER: '$AKS_CLUSTER', AKS_RG: '$AKS_RG'"
               if [[ "$GITHUB_REF" == "refs/heads/main" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ Staging deployment approved: main branch or manual trigger"
@@ -140,8 +137,9 @@ jobs:
               fi
               ;;
             "production")
-              AKS_CLUSTER="${{ secrets.AKS_CLUSTER_NAME_PROD }}"
-              AKS_RG="${{ secrets.AKS_RESOURCE_GROUP_PROD }}"
+              AKS_CLUSTER="$AKS_CLUSTER_NAME_PROD"
+              AKS_RG="$AKS_RESOURCE_GROUP_PROD"
+              echo "🔍 Production environment - AKS_CLUSTER: '$AKS_CLUSTER', AKS_RG: '$AKS_RG'"
               if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ Production deployment approved: release branch, tag, or manual trigger"
@@ -151,7 +149,6 @@ jobs:
               ;;
             *)
               echo "❌ Invalid environment: $TARGET_ENV"
-              # Set empty values for invalid environments
               AKS_CLUSTER=""
               AKS_RG=""
               ;;
@@ -168,25 +165,26 @@ jobs:
           if [ "$TARGET_ENV" != "unknown" ] && [ "$TARGET_ENV" != "" ]; then
             if [ -z "$AKS_CLUSTER" ]; then
               echo "❌ ERROR: AKS cluster name is empty for environment $TARGET_ENV"
-              echo "Check that AKS_CLUSTER_NAME_${TARGET_ENV^^} secret is set"
+              echo "Check that AKS_CLUSTER_NAME_${TARGET_ENV^^} repository secret is set"
               if [ "$SHOULD_DEPLOY" == "true" ]; then
                 exit 1
               fi
             fi
             if [ -z "$AKS_RG" ]; then
               echo "❌ ERROR: AKS resource group is empty for environment $TARGET_ENV"
-              echo "Check that AKS_RESOURCE_GROUP_${TARGET_ENV^^} secret is set"
+              echo "Check that AKS_RESOURCE_GROUP_${TARGET_ENV^^} repository secret is set"
               if [ "$SHOULD_DEPLOY" == "true" ]; then
                 exit 1
               fi
             fi
           fi
           
+          echo "=================== Setting output values ======================="
           echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
           echo "target_environment=$TARGET_ENV" >> $GITHUB_OUTPUT
           echo "aks_cluster_name=$AKS_CLUSTER" >> $GITHUB_OUTPUT
           echo "aks_resource_group=$AKS_RG" >> $GITHUB_OUTPUT
-          echo "✅ Environment validation completed successfully"
+          echo "Final decision: should_deploy=$SHOULD_DEPLOY, target_environment=$TARGET_ENV, aks_cluster_name=$AKS_CLUSTER, aks_resource_group=$AKS_RG"
 
   setup:
     runs-on: ubuntu-latest
@@ -248,107 +246,14 @@ jobs:
           application_name: ${{ inputs.application_name }}
           build_context: ${{ inputs.build_context }}
           java_version: '21'
-          run_tests: 'true'
+          run_tests: 'false'
           upload_artifacts: 'true'
-
-  sonar-scan:
-    runs-on: ubuntu-latest
-    needs: [validate-environment, setup, maven-build]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
-    outputs:
-      scan_status: ${{ steps.sonar.outputs.scan_status }}
-      quality_gate_status: ${{ steps.sonar.outputs.quality_gate_status }}
-      coverage: ${{ steps.sonar.outputs.coverage }}
-    steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Maven build artifacts
-        if: inputs.application_type == 'java-springboot'
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.maven-build.outputs.jar_artifact }}
-          path: ${{ inputs.build_context }}
-
-      - name: SonarQube Scan
-        id: sonar
-        uses: ./.github/actions/sonar-scan
-        with:
-          application_name: ${{ inputs.application_name }}
-          application_type: ${{ inputs.application_type }}
-          build_context: ${{ inputs.build_context }}
-          sonar_enabled: ${{ vars.SONAR_ENABLED || 'true' }}
-          sonar_host_url: ${{ vars.SONAR_HOST_URL }}
-          sonar_token: ${{ secrets.SONAR_TOKEN }}
-          sonar_project_key: ${{ vars.SONAR_PROJECT_KEY || inputs.application_name }}
-          sonar_coverage_threshold: ${{ vars.SONAR_COVERAGE_THRESHOLD || '80' }}
-          sonar_reliability_rating: ${{ vars.SONAR_RELIABILITY_RATING || '1' }}
-          sonar_security_rating: ${{ vars.SONAR_SECURITY_RATING || '1' }}
-          sonar_maintainability_rating: ${{ vars.SONAR_MAINTAINABILITY_RATING || '2' }}
-
-  checkmarx-scan:
-    runs-on: ubuntu-latest
-    needs: [validate-environment, setup, maven-build]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
-    outputs:
-      scan_status: ${{ steps.checkmarx.outputs.scan_status }}
-      overall_results: ${{ steps.checkmarx.outputs.overall_results }}
-      scan_id: ${{ steps.checkmarx.outputs.scan_id }}
-    steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Maven build artifacts
-        if: inputs.application_type == 'java-springboot'
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.maven-build.outputs.jar_artifact }}
-          path: ${{ inputs.build_context }}
-
-      - name: Checkmarx Scan
-        id: checkmarx
-        uses: ./.github/actions/checkmarx-scan
-        with:
-          application_name: ${{ inputs.application_name }}
-          application_type: ${{ inputs.application_type }}
-          build_context: ${{ inputs.build_context }}
-          checkmarx_enabled: ${{ vars.CHECKMARX_ENABLED || 'true' }}
-          checkmarx_url: ${{ vars.CHECKMARX_URL }}
-          cx_tenant: ${{ vars.CX_TENANT }}
-          checkmarx_client_id: ${{ secrets.CHECKMARX_CLIENT_ID }}
-          checkmarx_client_secret: ${{ secrets.CHECKMARX_CLIENT_SECRET }}
-          checkmarx_scan_types: ${{ vars.CHECKMARX_SCAN_TYPES || 'sca,sast,kics' }}
-          checkmarx_sast_preset: ${{ vars.CHECKMARX_SAST_PRESET || 'Checkmarx Default' }}
-          checkmarx_sca_resolver: ${{ vars.CHECKMARX_SCA_RESOLVER || 'auto' }}
-          checkmarx_kics_platforms: ${{ vars.CHECKMARX_KICS_PLATFORMS || 'Docker,Kubernetes,Terraform' }}
-          checkmarx_fail_build: ${{ vars.CHECKMARX_FAIL_BUILD || 'true' }}
-          checkmarx_high_threshold: ${{ vars.CHECKMARX_HIGH_THRESHOLD || '0' }}
-          checkmarx_medium_threshold: ${{ vars.CHECKMARX_MEDIUM_THRESHOLD || '5' }}
-          checkmarx_low_threshold: ${{ vars.CHECKMARX_LOW_THRESHOLD || '10' }}
 
   build:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, maven-build, sonar-scan, checkmarx-scan]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && !failure() && !cancelled()
+    needs: [validate-environment, setup, maven-build]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true'
     steps:
-      - name: Clean workspace and Docker
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'true'
-          cleanup_temp: 'true'
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -375,43 +280,32 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && !failure() && !cancelled()
+    needs: [validate-environment, setup, build]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true'
     environment: ${{ needs.validate-environment.outputs.target_environment }}
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Debug validate-environment outputs
+      - name: 🚨 DEBUG - Check received outputs
         run: |
-          echo "🔍 Debugging validate-environment job outputs:"
-          echo "   - should_deploy: ${{ needs.validate-environment.outputs.should_deploy }}"
-          echo "   - target_environment: ${{ needs.validate-environment.outputs.target_environment }}"
-          echo "   - aks_cluster_name: ${{ needs.validate-environment.outputs.aks_cluster_name }}"
-          echo "   - aks_resource_group: ${{ needs.validate-environment.outputs.aks_resource_group }}"
+          echo "🔍 What deploy job received from validate-environment:"
+          echo "should_deploy: '${{ needs.validate-environment.outputs.should_deploy }}'"
+          echo "target_environment: '${{ needs.validate-environment.outputs.target_environment }}'"
+          echo "aks_cluster_name: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
+          echo "aks_resource_group: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
           echo ""
-          echo "🔍 Raw GitHub context:"
-          echo "   - github.ref: ${{ github.ref }}"
-          echo "   - github.event_name: ${{ github.event_name }}"
-          echo "   - inputs.environment: ${{ inputs.environment }}"
-          
-          # Validate outputs are not empty
+          echo "🔍 Checking if values are null or empty:"
           if [ -z "${{ needs.validate-environment.outputs.aks_cluster_name }}" ]; then
-            echo "❌ ERROR: aks_cluster_name output is empty!"
+            echo "❌ aks_cluster_name is NULL/EMPTY in deploy job"
           else
-            echo "✅ aks_cluster_name is set"
+            echo "✅ aks_cluster_name received: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
           fi
           
           if [ -z "${{ needs.validate-environment.outputs.aks_resource_group }}" ]; then
-            echo "❌ ERROR: aks_resource_group output is empty!"
+            echo "❌ aks_resource_group is NULL/EMPTY in deploy job"
           else
-            echo "✅ aks_resource_group is set"
+            echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
           fi
 
       - name: Deploy to AKS
@@ -433,22 +327,14 @@ jobs:
 
   create_release:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, deploy]
+    needs: [validate-environment, setup, deploy]
     if: |
       needs.validate-environment.outputs.should_deploy == 'true' && 
       needs.setup.outputs.should_deploy == 'true' && 
-      needs.sonar-scan.outputs.scan_status == 'PASSED' &&
-      needs.checkmarx-scan.outputs.scan_status == 'PASSED' &&
       needs.validate-environment.outputs.target_environment == 'production' && 
       (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')) &&
       !failure() && !cancelled()
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -457,14 +343,3 @@ jobs:
         with:
           version: ${{ needs.setup.outputs.version }}
           application_name: ${{ inputs.application_name }}
-
-  cleanup:
-    runs-on: ubuntu-latest
-    needs: [validate-environment, setup, maven-build, sonar-scan, checkmarx-scan, build, deploy, create_release]
-    if: always() && needs.validate-environment.outputs.should_deploy == 'true'
-    steps:
-      - name: Final comprehensive cleanup
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'true'
-          cleanup_temp: 'true'

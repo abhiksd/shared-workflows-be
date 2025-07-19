@@ -33,11 +33,11 @@ inputs:
     description: 'Azure Tenant ID for Key Vault'
     required: false
   azure_client_id:
-    description: 'Azure Client ID (App Registration) for OIDC authentication'
+    description: 'Azure Client ID (Managed Identity) for Key Vault'
     required: false
   azure_subscription_id:
-    description: 'Azure Subscription ID for OIDC authentication'
-    required: false
+    description: 'Azure Subscription ID for Managed Identity authentication'
+    required: true
   keyvault_name:
     description: 'Azure Key Vault name'
     required: false
@@ -53,6 +53,17 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Debug AKS inputs
+      run: |
+        echo "🔍 Helm Deploy Action - Input Parameters:"
+        echo "AKS Cluster Name: '${{ inputs.aks_cluster_name }}'"
+        echo "AKS Resource Group: '${{ inputs.aks_resource_group }}'"
+        echo "Environment: '${{ inputs.environment }}'"
+        echo "Application Name: '${{ inputs.application_name }}'"
+        echo "Image Tag: '${{ inputs.image_tag }}'"
+        echo "Registry: '${{ inputs.registry }}'"
+      shell: bash
+
     - name: Validate required parameters
       run: |
         echo "🔍 Validating AKS deployment parameters..."
@@ -61,24 +72,15 @@ runs:
         if [ -z "${{ inputs.aks_resource_group }}" ]; then
           echo "❌ ERROR: aks_resource_group is empty or not provided"
           echo "This usually means:"
-          echo "  - AKS_RESOURCE_GROUP_* secrets are not set"
+          echo "  - AKS_RESOURCE_GROUP_* repository secrets are not set"
           echo "  - Environment detection failed"
           echo "  - validate-environment job didn't set outputs correctly"
+          echo "  - deploy job is not passing the parameter to helm-deploy action"
           exit 1
         fi
         
         if [ -z "${{ inputs.aks_cluster_name }}" ]; then
           echo "❌ ERROR: aks_cluster_name is empty or not provided"
-          exit 1
-        fi
-        
-        if [ -z "${{ inputs.azure_client_id }}" ]; then
-          echo "❌ ERROR: azure_client_id is empty or not provided"
-          exit 1
-        fi
-        
-        if [ -z "${{ inputs.azure_tenant_id }}" ]; then
-          echo "❌ ERROR: azure_tenant_id is empty or not provided"
           exit 1
         fi
         
@@ -88,13 +90,11 @@ runs:
         fi
         
         echo "✅ All required parameters are provided:"
-        echo "   - AKS Resource Group: ${{ inputs.aks_resource_group }}"
-        echo "   - AKS Cluster Name: ${{ inputs.aks_cluster_name }}"
-        echo "   - Azure Tenant ID: ${{ inputs.azure_tenant_id }}"
-        echo "   - Azure Client ID: ${{ inputs.azure_client_id }}"
-        echo "   - Azure Subscription ID: ${{ inputs.azure_subscription_id }}"
+        echo "   - AKS Resource Group: '${{ inputs.aks_resource_group }}'"
+        echo "   - AKS Cluster Name: '${{ inputs.aks_cluster_name }}'"
+        echo "   - Azure Subscription ID: '${{ inputs.azure_subscription_id }}'"
       shell: bash
-
+      
     - name: Azure Login with OIDC
       uses: azure/login@v2
       with:

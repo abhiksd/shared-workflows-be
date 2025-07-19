@@ -1,0 +1,54 @@
+name: Deploy Java Spring Boot Application
+
+on:
+  push:
+    branches:
+      - N630-6258_Helm_deploy
+      - develop
+      - 'release/**'
+    # paths:
+    #   - './**'
+    #   - 'helm/dces-sld-helper/**'
+    #   - '.github/workflows/dces-sld-helper-ci.yml'
+  pull_request:
+    branches:
+      - develop
+      - N630-6258_Helm_deploy
+    paths:
+      - './**'
+      - 'helm/dces-sld-helper/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      force_deploy:
+        description: 'Force deployment even if no changes'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # Deploy Java Application
+  deploy:
+    uses: ./.github/workflows/shared-deploy.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'auto' }}
+      application_name: dces-sld-helper
+      application_type: java-springboot
+      build_context: ./
+      dockerfile_path: ./Dockerfile
+      helm_chart_path: helm/dces-sld-helper
+      force_deploy: ${{ github.event.inputs.force_deploy == 'true' }}
+    secrets:
+      ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+      KEYVAULT_NAME: ${{ secrets.KEYVAULT_NAME }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # Note: AKS secrets removed - now accessed directly as repository secrets in shared workflow
