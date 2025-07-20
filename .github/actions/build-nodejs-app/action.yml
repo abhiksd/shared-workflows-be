@@ -1,0 +1,101 @@
+name: 'Build Node.js Application'
+description: 'Composite action to build Node.js applications'
+inputs:
+  node_version:
+    description: 'Node.js version to use'
+    required: false
+    default: '18'
+  build_context:
+    description: 'Build context path'
+    required: false
+    default: 'apps/nodejs-app'
+  skip_tests:
+    description: 'Skip tests during build'
+    required: false
+    default: 'false'
+  package_manager:
+    description: 'Package manager to use (npm, yarn)'
+    required: false
+    default: 'npm'
+
+outputs:
+  build_success:
+    description: 'Whether the build was successful'
+    value: ${{ steps.build.outputs.build_success }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: ${{ inputs.package_manager }}
+        cache-dependency-path: ${{ inputs.build_context }}/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        cd ${{ inputs.build_context }}
+        
+        if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+          yarn install --frozen-lockfile
+        else
+          npm ci
+        fi
+        
+        echo "✅ Dependencies installed successfully"
+
+    - name: Run tests
+      shell: bash
+      if: inputs.skip_tests != 'true'
+      run: |
+        cd ${{ inputs.build_context }}
+        
+        if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+          yarn test
+        else
+          npm run test
+        fi
+        
+        echo "✅ Tests completed successfully"
+
+    - name: Build application
+      id: build
+      shell: bash
+      run: |
+        cd ${{ inputs.build_context }}
+        
+        # Check if build script exists
+        if npm run | grep -q "build"; then
+          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+            yarn build
+          else
+            npm run build
+          fi
+          echo "✅ Application built successfully"
+        else
+          echo "ℹ️ No build script found, skipping build step"
+        fi
+        
+        echo "build_success=true" >> $GITHUB_OUTPUT
+
+    - name: Verify build artifacts
+      shell: bash
+      run: |
+        cd ${{ inputs.build_context }}
+        echo "📦 Application structure:"
+        ls -la
+        
+        if [ -d "dist" ]; then
+          echo "📊 Dist directory:"
+          ls -la dist/
+        fi
+        
+        if [ -d "build" ]; then
+          echo "📊 Build directory:"
+          ls -la build/
+        fi
+        
+        echo "📄 Package.json scripts:"
+        cat package.json | jq '.scripts // {}'

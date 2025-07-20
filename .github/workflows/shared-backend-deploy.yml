@@ -1,0 +1,199 @@
+name: Shared Backend Deployment Workflow
+
+on:
+  workflow_call:
+    inputs:
+      backend_name:
+        description: 'Backend name (e.g., java-backend1, nodejs-backend2)'
+        required: true
+        type: string
+      backend_type:
+        description: 'Backend type (java or nodejs)'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment (dev, staging, production)'
+        required: false
+        type: string
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip tests during build'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Perform a dry run deployment'
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Azure Client ID for authentication'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Azure Tenant ID for authentication'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure Subscription ID'
+        required: true
+      ACR_LOGIN_SERVER:
+        description: 'Azure Container Registry login server'
+        required: true
+      AZURE_RESOURCE_GROUP:
+        description: 'Azure Resource Group containing AKS'
+        required: true
+      AKS_CLUSTER_NAME:
+        description: 'AKS Cluster Name'
+        required: true
+
+env:
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+
+jobs:
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      should_deploy: ${{ steps.env.outputs.should_deploy }}
+    steps:
+      - name: Determine target environment
+        id: env
+        run: |
+          # Determine environment based on input or branch
+          if [ -n "${{ inputs.environment }}" ]; then
+            ENVIRONMENT="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENVIRONMENT="production"
+          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            ENVIRONMENT="staging"
+          else
+            ENVIRONMENT="dev"
+          fi
+          
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          
+          # Check if we should deploy
+          if [ "${{ inputs.force_deploy }}" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_deploy=true" >> $GITHUB_OUTPUT  # For now, always deploy on code changes
+          fi
+          
+          echo "🎯 Target Environment: ${ENVIRONMENT}"
+          echo "🚀 Should Deploy: ${{ inputs.force_deploy == 'true' || github.event_name == 'workflow_dispatch' || 'true' }}"
+
+  build-and-deploy:
+    needs: determine-environment
+    if: needs.determine-environment.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build Java Application
+        if: inputs.backend_type == 'java'
+        uses: ./.github/actions/build-java-app
+        with:
+          build_context: 'apps/java-app'
+          skip_tests: ${{ inputs.skip_tests }}
+
+      - name: Build Node.js Application
+        if: inputs.backend_type == 'nodejs'
+        uses: ./.github/actions/build-nodejs-app
+        with:
+          build_context: 'apps/nodejs-app'
+          skip_tests: ${{ inputs.skip_tests }}
+
+      - name: Build and Push Docker Image
+        id: docker
+        uses: ./.github/actions/docker-build-push
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ inputs.backend_name }}
+          build_context: ${{ inputs.backend_type == 'java' && 'apps/java-app' || 'apps/nodejs-app' }}
+          environment: ${{ needs.determine-environment.outputs.environment }}
+          commit_sha: ${{ github.sha }}
+
+      - name: Deploy with Helm
+        uses: ./.github/actions/helm-deploy
+        with:
+          application_name: ${{ inputs.backend_name }}
+          environment: ${{ needs.determine-environment.outputs.environment }}
+          helm_chart_path: 'helm/${{ inputs.backend_name }}'
+          image_tag: ${{ needs.determine-environment.outputs.environment }}-${{ github.sha }}
+          aks_cluster_name: ${{ secrets.AKS_CLUSTER_NAME }}
+          aks_resource_group: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          dry_run: ${{ inputs.dry_run }}
+
+      - name: Post-deployment verification
+        if: inputs.dry_run != 'true'
+        run: |
+          ENVIRONMENT="${{ needs.determine-environment.outputs.environment }}"
+          BACKEND_NAME="${{ inputs.backend_name }}"
+          
+          echo "🔍 Post-deployment verification for ${BACKEND_NAME}"
+          echo "=================================================="
+          
+          # Wait a bit for ingress to be ready
+          sleep 30
+          
+          # Get ingress information
+          echo "🌐 Ingress Information:"
+          kubectl get ingress -n ${ENVIRONMENT} -l app.kubernetes.io/name=${BACKEND_NAME} -o wide || echo "No ingress found"
+          
+          # Check service endpoints
+          echo ""
+          echo "🔗 Service Endpoints:"
+          kubectl get svc -n ${ENVIRONMENT} -l app.kubernetes.io/name=${BACKEND_NAME} -o wide
+          
+          # Display deployment summary
+          echo ""
+          echo "✅ Deployment Summary:"
+          echo "  Backend: ${BACKEND_NAME}"
+          echo "  Type: ${{ inputs.backend_type }}"
+          echo "  Environment: ${ENVIRONMENT}"
+          echo "  Image: ${{ steps.docker.outputs.image_tag }}"
+          echo "  Domain: ${ENVIRONMENT}.mydomain.com/${BACKEND_NAME#*-}"
+          
+          # Add to GitHub summary
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🚀 Backend Deployment Summary
+          
+          **Backend:** ${BACKEND_NAME}  
+          **Type:** ${{ inputs.backend_type }}  
+          **Environment:** ${ENVIRONMENT}  
+          **Image:** \`${{ steps.docker.outputs.image_tag }}\`  
+          **Domain:** \`${ENVIRONMENT}.mydomain.com/${BACKEND_NAME#*-}\`  
+          **Namespace:** \`${ENVIRONMENT}\`  
+          
+          ### 🧪 Test Your Deployment
+          \`\`\`bash
+          # Health check
+          curl https://${ENVIRONMENT}.mydomain.com/${BACKEND_NAME#*-}/actuator/health
+          
+          # API test
+          curl https://${ENVIRONMENT}.mydomain.com/${BACKEND_NAME#*-}/api/status
+          \`\`\`
+          
+          ### 📊 Resources
+          \`\`\`
+          $(kubectl get all -n ${ENVIRONMENT} -l app.kubernetes.io/name=${BACKEND_NAME} 2>/dev/null || echo "No resources found")
+          \`\`\`
+          EOF
