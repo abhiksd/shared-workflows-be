@@ -1,4 +1,4 @@
-name: Deploy Java Backend 2 - Product Catalog Service
+name: Deploy Java Backend 1 - User Management Service
 
 permissions:
   id-token: write
@@ -12,7 +12,7 @@ on:
       - develop
       - 'release/**'
     paths:
-      - 'apps/java-backend2/**'
+      - '**'
       - 'helm/**'
       - '.github/workflows/deploy.yml'
   pull_request:
@@ -20,7 +20,7 @@ on:
       - main
       - develop
     paths:
-      - 'apps/java-backend2/**'
+      - '**'
       - 'helm/**'
   workflow_dispatch:
     inputs:
@@ -39,16 +39,16 @@ on:
         default: false
 
 jobs:
-  # Deploy Java Backend 2 - Product Catalog Service
+  # Deploy Java Backend 1 - User Management Service
   deploy:
     uses: ./.github/workflows/shared-deploy.yml
     with:
       environment: ${{ github.event.inputs.environment || 'auto' }}
-      application_name: java-backend2
+      application_name: java-backend1
       application_type: java-springboot
-      build_context: apps/java-backend2
-      dockerfile_path: apps/java-backend2/Dockerfile
-      helm_chart_path: helm
+      build_context: .
+      dockerfile_path: ./Dockerfile
+      helm_chart_path: ./helm
       force_deploy: ${{ github.event.inputs.force_deploy == 'true' }}
       aks_cluster_name_dev: ${{ vars.AKS_CLUSTER_NAME_DEV }}
       aks_resource_group_dev: ${{ vars.AKS_RESOURCE_GROUP_DEV }}

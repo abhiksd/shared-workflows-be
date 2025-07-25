@@ -1,254 +1,215 @@
-# Shared Workflows & Microservices Template Repository
+# Java Backend1
 
-This repository serves as a **template and migration hub** for creating independent microservices with centralized shared workflows. It contains ready-to-migrate backend services and comprehensive infrastructure setup guides.
+A Spring Boot microservice for Java Backend1 functionality.
 
-## 🎯 **Repository Purpose**
+## 🚀 Quick Start
 
-### **Primary Use Cases:**
-1. **📦 Backend Service Templates**: Complete, production-ready backend services ready for migration to independent repositories
-2. **🔄 Shared Workflow Infrastructure**: Centralized GitHub Actions workflows for consistent deployment patterns
-3. **📖 Migration Guidance**: Comprehensive guides for splitting monorepo into microservices architecture
-4. **🛠️ Infrastructure Setup**: Azure cloud infrastructure and Kubernetes deployment guides
-
-## 🏗️ **Current Repository Structure**
-
-```
-📁 Shared Workflows Template Repository
-├── apps/                                    # 🎁 Ready-to-Migrate Backend Services
-│   ├── java-backend1/                      # User Management Service (Spring Boot)
-│   │   ├── .github/workflows/deploy.yml    # Individual deployment workflow
-│   │   ├── src/, pom.xml, Dockerfile      # Complete source code
-│   │   ├── helm/                           # Kubernetes Helm charts
-│   │   └── DEPLOYMENT.md                   # Service-specific documentation
-│   ├── java-backend2/                      # Product Catalog Service (Spring Boot)
-│   ├── java-backend3/                      # Order Management Service (Spring Boot)
-│   ├── nodejs-backend1/                    # Notification Service (Express.js)
-│   ├── nodejs-backend2/                    # Analytics Service (Express.js)
-│   └── nodejs-backend3/                    # File Management Service (Express.js)
-├── .github/workflows/                      # 🔄 Shared Workflow Infrastructure
-│   ├── shared-deploy.yml                  # Reusable deployment workflow
-│   ├── rollback-deployment.yml            # Centralized rollback capability
-│   ├── deploy-monitoring.yml              # Monitoring stack deployment
-│   └── pr-security-check.yml              # Security validation workflow
-├── helm/monitoring/                        # 📊 Shared monitoring infrastructure
-├── scripts/                               # 🛠️ Infrastructure setup scripts
-├── docs/                                  # 📚 Comprehensive setup guides
-└── REPOSITORY_MIGRATION_GUIDE.md          # 🚀 Migration instructions
-```
-
-## 🚀 **Quick Start - Using This Repository**
-
-### **Option 1: Migrate to Separate Repositories (Recommended)**
-
-Follow the comprehensive [Repository Migration Guide](./REPOSITORY_MIGRATION_GUIDE.md) to:
-
-1. **Create separate repositories** for each backend service
-2. **Set up centralized shared workflows** repository 
-3. **Migrate each service** with all dependencies included
-4. **Test independent deployments** for each service
-
+### Local Development
 ```bash
-# Example migration for User Management Service
-git clone https://github.com/your-org/java-backend1-user-management.git
-cp -r apps/java-backend1/* java-backend1-user-management/
-# Update workflow references to external shared workflows
-# Push to new repository
+# Build and run
+mvn clean spring-boot:run
+
+# Run with specific profile
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+
+# Or with Docker
+docker build -t java-backend1 .
+docker run -p 8080:8080 java-backend1
 ```
 
-### **Option 2: Use as Monorepo Template**
+### API Endpoints
+- **Base URL**: `http://localhost:8080/api`
+- **Health Check**: `/actuator/health`
+- **Metrics**: `/actuator/prometheus`
+- **Info**: `/actuator/info`
 
-Deploy all services from this repository:
+## 🏗️ Architecture
 
+- **Framework**: Spring Boot 3.x
+- **Java Version**: 21
+- **Build Tool**: Maven
+- **Database**: PostgreSQL (configurable)
+- **Caching**: Redis
+- **Monitoring**: Prometheus + Grafana
+- **Deployment**: Kubernetes with Helm
+
+## 🔧 Configuration
+
+### Spring Boot Profiles
+- **local**: Local development with H2 database
+- **dev**: Development environment with PostgreSQL
+- **staging**: Staging environment with full monitoring
+- **production**: Production environment with all features
+
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DB_HOST` | Database host | localhost |
+| `DB_PORT` | Database port | 5432 |
+| `DB_NAME` | Database name | java_backend1_dev |
+| `DB_USERNAME` | Database username | app_user |
+| `DB_PASSWORD` | Database password | (required) |
+| `REDIS_HOST` | Redis host | localhost |
+| `REDIS_PORT` | Redis port | 6379 |
+
+## 🚀 Deployment
+
+This service uses shared GitHub Actions workflows from the `shared-github-actions` branch.
+
+### Manual Deployment
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/shared-workflows-be.git
-cd shared-workflows-be
-
-# Deploy individual service
-cd apps/java-backend1
+# Deploy to development
 gh workflow run deploy.yml -f environment=dev
 
-# Deploy monitoring stack
-gh workflow run deploy-monitoring.yml -f environment=dev
+# Deploy to staging  
+gh workflow run deploy.yml -f environment=staging
+
+# Deploy to production
+gh workflow run deploy.yml -f environment=production
 ```
 
-## 🏗️ **Backend Services Available**
+### Automatic Deployment
+- **Dev**: Triggered on push to this branch
+- **Staging**: Triggered on push to `release/*` branches
+- **Production**: Triggered on push to `main` branch
 
-### **Java Spring Boot Services**
-| Service | Purpose | Endpoints | Status |
-|---------|---------|-----------|---------|
-| **java-backend1** | User Management | `/api/users`, `/actuator/health` | ✅ Ready |
-| **java-backend2** | Product Catalog | `/api/products`, `/actuator/health` | ✅ Ready |
-| **java-backend3** | Order Management | `/api/orders`, `/actuator/health` | ✅ Ready |
+## 📊 Monitoring & Observability
 
-### **Node.js Express Services**
-| Service | Purpose | Endpoints | Status |
-|---------|---------|-----------|---------|
-| **nodejs-backend1** | Notification Service | `/api/notifications`, `/health` | ✅ Ready |
-| **nodejs-backend2** | Analytics Service | `/api/analytics`, `/health` | ✅ Ready |
-| **nodejs-backend3** | File Management | `/api/files`, `/health` | ✅ Ready |
+### Health Checks
+- **Liveness**: `/actuator/health/liveness`
+- **Readiness**: `/actuator/health/readiness`
+- **Custom Health**: Application-specific indicators
 
-## 🔄 **Shared Workflow Infrastructure**
+### Metrics
+- **Prometheus**: `/actuator/prometheus`
+- **JVM Metrics**: Memory, GC, threads
+- **HTTP Metrics**: Request duration, response codes
+- **Custom Metrics**: Business-specific metrics
 
-### **Available Workflows**
+### Logging
+- **Format**: JSON structured logging
+- **Levels**: Configurable per environment
+- **Correlation**: Request tracing with correlation IDs
 
-#### **shared-deploy.yml** - Universal Deployment
-- ✅ Supports Java Spring Boot and Node.js applications
-- ✅ Multi-environment deployment (dev, staging, production)
-- ✅ Azure Container Registry and AKS integration
-- ✅ Helm chart deployment with environment-specific values
-- ✅ Comprehensive health checks and rollback support
+## 🛠️ Development
 
-#### **rollback-deployment.yml** - Centralized Rollback
-- ✅ Helm-based rollback capabilities
-- ✅ Multi-environment rollback support
-- ✅ Automated rollback triggers on deployment failures
+### Prerequisites
+- Java 21+
+- Maven 3.6+
+- Docker & Docker Compose
+- PostgreSQL (for local dev)
 
-#### **deploy-monitoring.yml** - Monitoring Stack
-- ✅ Prometheus and Grafana deployment
-- ✅ AlertManager configuration
-- ✅ Service discovery and monitoring rules
-
-#### **pr-security-check.yml** - Security Validation
-- ✅ Code security scanning
-- ✅ Dependency vulnerability checks
-- ✅ Docker image security validation
-
-## 📚 **Comprehensive Documentation**
-
-### **Setup Guides**
-- **[Azure Setup Guide](./docs/AZURE_SETUP_GUIDE.md)** - Complete Azure cloud infrastructure setup
-- **[Helm Chart Guide](./docs/HELM_CHART_GUIDE.md)** - Kubernetes deployment configuration
-- **[Monitoring Setup Guide](./docs/MONITORING_SETUP_GUIDE.md)** - Observability stack configuration
-- **[Spring Boot Profiles Guide](./docs/SPRING_BOOT_PROFILES_AND_SECRETS.md)** - Application configuration and secrets management
-- **[Deployment Verification Guide](./docs/DEPLOYMENT_VERIFICATION_GUIDE.md)** - Comprehensive post-deployment testing and health checks
-
-### **Migration & Deployment**
-- **[Repository Migration Guide](./REPOSITORY_MIGRATION_GUIDE.md)** - Step-by-step migration to separate repositories
-- **Individual Service Deployment Guides** - Located in each `apps/[service]/DEPLOYMENT.md`
-
-## 🛠️ **Infrastructure Requirements**
-
-### **Azure Resources**
-- **Azure Kubernetes Service (AKS)** - Container orchestration
-- **Azure Container Registry (ACR)** - Docker image storage
-- **Azure Key Vault** - Secrets management
-- **Azure Application Gateway** - Ingress and load balancing
-
-### **Kubernetes Components**
-- **NGINX Ingress Controller** - HTTP routing and SSL termination
-- **Helm 3.x** - Package management and deployments
-- **Prometheus + Grafana** - Monitoring and observability
-- **Azure CSI Driver** - Secrets injection
-
-## 🎯 **Architecture Benefits**
-
-### **🔄 Microservices Independence**
-- ✅ Each service can be deployed independently
-- ✅ Service-specific scaling and resource allocation
-- ✅ Isolated failure domains and fault tolerance
-- ✅ Technology diversity (Java + Node.js + more)
-
-### **🚀 Operational Excellence**
-- ✅ Centralized deployment standards via shared workflows
-- ✅ Consistent monitoring and observability across services
-- ✅ Automated rollback and disaster recovery
-- ✅ Security scanning and compliance validation
-
-### **👥 Team Productivity**
-- ✅ Clear service ownership boundaries
-- ✅ Independent development and release cycles
-- ✅ Reduced coordination overhead
-- ✅ Self-service deployment capabilities
-
-## 🔐 **Security & Compliance**
-
-### **Security Features**
-- **🔒 Azure Key Vault Integration** - Centralized secrets management
-- **🛡️ RBAC and Identity Management** - Azure AD integration
-- **🔍 Security Scanning** - Automated vulnerability detection
-- **🌐 Network Security** - Private networking and ingress controls
-
-### **Compliance Standards**
-- **📋 Infrastructure as Code** - Version-controlled infrastructure
-- **📊 Audit Logging** - Comprehensive deployment and access logs
-- **🔄 Automated Compliance Checks** - Policy validation and enforcement
-- **🚨 Monitoring and Alerting** - Proactive issue detection
-
-## 🚀 **Getting Started**
-
-### **1. Choose Your Path**
+### Setup
 ```bash
-# Option A: Migrate to separate repositories (recommended for production)
-# Follow: ./REPOSITORY_MIGRATION_GUIDE.md
+# Clone and switch to app branch
+git clone <repository-url>
+git checkout my-java-app
 
-# Option B: Use as monorepo template (good for experimentation)
-git clone <this-repo>
-cd apps/java-backend1
-gh workflow run deploy.yml -f environment=dev
+# Install dependencies
+mvn clean install
+
+# Run tests
+mvn test
+
+# Run with development profile
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-### **2. Set Up Infrastructure**
+### Testing
 ```bash
-# Follow Azure setup guide
-./scripts/azure-keyvault-setup.sh
-./scripts/azure-identity-check.sh
+# Unit tests
+mvn test
 
-# Deploy monitoring stack
-gh workflow run deploy-monitoring.yml -f environment=dev
+# Integration tests
+mvn verify
+
+# Test with specific profile
+mvn test -Dspring.profiles.active=dev
 ```
 
-### **3. Deploy Services**
+### Docker Development
 ```bash
-# Deploy individual services
-cd apps/java-backend1
-gh workflow run deploy.yml -f environment=dev
+# Build image
+docker build -t java-backend1:latest .
 
-# Verify deployment
-curl https://dev.mydomain.com/backend1/actuator/health
+# Run with docker-compose (if available)
+docker-compose up -d
+
+# Run standalone
+docker run -p 8080:8080 \
+  -e SPRING_PROFILES_ACTIVE=dev \
+  -e DB_HOST=host.docker.internal \
+  java-backend1:latest
 ```
 
-## 📞 **Support & Contributing**
+## 🔗 Branch Structure
 
-### **Getting Help**
-1. 📖 Check the comprehensive documentation in `/docs`
-2. 🔍 Review service-specific deployment guides
-3. 🛠️ Run infrastructure setup scripts for environment validation
-4. 📋 Follow troubleshooting guides in individual service documentation
+This repository uses a branch-based approach:
 
-### **Contributing**
-1. **🔧 Infrastructure Improvements** - Enhance shared workflows and infrastructure
-2. **📚 Documentation Updates** - Improve setup guides and examples
-3. **🎯 New Service Templates** - Add additional backend service examples
-4. **🔐 Security Enhancements** - Strengthen security patterns and practices
+- **`shared-github-actions`**: Shared CI/CD workflows and composite actions
+- **`my-java-app`**: This Spring Boot application (current branch)
+- **`main`**: Production releases
 
-## 📊 **Monitoring & Observability**
+### Workflow Integration
 
-### **Available Dashboards**
-- **🏗️ Infrastructure Metrics** - AKS cluster health and resource utilization
-- **🚀 Application Performance** - Service response times and error rates
-- **🔍 Business Metrics** - Custom application metrics per service
-- **🚨 Alerting Rules** - Proactive monitoring and incident response
+The deployment workflow references shared workflows:
 
-### **Health Check Endpoints**
+```yaml
+uses: ./.github/workflows/shared-deploy.yml@shared-github-actions
+```
+
+## 📚 Documentation
+
+- [Deployment Guide](./DEPLOYMENT.md) - Comprehensive deployment instructions
+- [Shared Workflows](../../tree/shared-github-actions) - CI/CD workflows documentation
+- [API Documentation](./docs/api.md) - API endpoints and examples
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Application won't start**
+   - Check database connectivity
+   - Verify environment variables
+   - Check application logs
+
+2. **Workflow failures**
+   - Verify shared workflows are up to date
+   - Check repository secrets configuration
+   - Review workflow logs
+
+3. **Docker build fails**
+   - Check Dockerfile syntax
+   - Verify JAR file exists in target/
+   - Ensure Maven build completes successfully
+
+### Debug Commands
 ```bash
-# Java Services
-curl https://dev.mydomain.com/backend1/actuator/health
-curl https://dev.mydomain.com/backend2/actuator/health
-curl https://dev.mydomain.com/backend3/actuator/health
+# Check application logs
+kubectl logs -f deployment/java-backend1
 
-# Node.js Services  
-curl https://dev.mydomain.com/backend1/health
-curl https://dev.mydomain.com/backend2/health
-curl https://dev.mydomain.com/backend3/health
+# Check health status
+curl http://localhost:8080/actuator/health
+
+# View configuration
+curl http://localhost:8080/actuator/configprops
 ```
+
+## 🤝 Contributing
+
+1. Create a feature branch from `my-java-app`
+2. Make your changes
+3. Test locally and with CI/CD
+4. Create a pull request to `my-java-app`
+
+## 📄 License
+
+This project is licensed under the MIT License.
 
 ---
 
-**🎯 Purpose**: Template and migration hub for microservices architecture  
-**🔄 Workflows**: Centralized shared deployment infrastructure  
-**📊 Monitoring**: Comprehensive observability and alerting  
-**🚀 Deployment**: Production-ready Kubernetes with Helm  
-**☁️ Cloud**: Azure-native with enterprise security patterns
-
-This repository provides everything needed to establish a robust microservices architecture with operational excellence! 🚀
+**Service**: Java Backend1  
+**Branch**: my-java-app  
+**Type**: Spring Boot Microservice  
+**Shared Workflows**: shared-github-actions branch  
+**Deployment**: GitHub Actions + Kubernetes + Helm

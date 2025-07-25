@@ -1,13 +1,16 @@
-# Node.js Backend 2 - Analytics Service Deployment
+# Java Backend1 Deployment Guide
 
-This document describes how to deploy the Analytics Service using the integrated GitHub Actions workflow.
+This service is deployed from the `my-java-app` branch using shared workflows from the `shared-github-actions` branch.
+
+
+This document describes how to deploy the User Management Service using the integrated GitHub Actions workflow.
 
 ## 🏗️ **Service Overview**
 
-**Java Backend 1** is a Express.js application that handles:
-- Analytics data processing
-- Business intelligence reports
-- Data visualization
+**Java Backend 1** is a Spring Boot application that handles:
+- User authentication and authorization
+- User profile management
+- Account management operations
 
 ## 🚀 **Deployment Methods**
 
@@ -25,7 +28,7 @@ on:
       - 'release/**'  # Release candidate deployments
       - 'feature/**'  # Feature branch deployments
     paths:
-      - 'apps/nodejs-backend2/**'        # Source code changes
+      - '**'        # Source code changes
       - 'helm/**'        # Helm chart changes
       - '.github/workflows/deploy.yml' # Workflow changes
 ```
@@ -41,7 +44,7 @@ gh workflow run deploy.yml -f environment=staging
 gh workflow run deploy.yml -f environment=production
 
 # Or through GitHub UI:
-# Actions → Deploy Node.js Backend 2 - Analytics Service → Run workflow
+# Actions → Deploy Java Backend 1 - User Management Service → Run workflow
 ```
 
 **Manual deployment options:**
@@ -63,10 +66,10 @@ jobs:
   deploy:
     uses: ./.github/workflows/shared-deploy.yml
     with:
-      application_name: nodejs-backend2
-      application_type: nodejs
-      build_context: apps/nodejs-backend2
-      dockerfile_path: apps/nodejs-backend2/Dockerfile
+      application_name: java-backend1
+      application_type: java-springboot
+      build_context: apps/java-backend1
+      dockerfile_path: Dockerfile
       helm_chart_path: helm
 ```
 
@@ -74,19 +77,19 @@ jobs:
 
 ### Development Environment
 - **Branch**: `develop`, `feature/**`
-- **URL**: `https://dev.mydomain.com/backend2`
+- **URL**: `https://dev.mydomain.com/backend1`
 - **Namespace**: `dev`
 - **Auto-deploy**: ✅ On push
 
 ### Staging Environment
 - **Branch**: `release/**`
-- **URL**: `https://staging.mydomain.com/backend2`
+- **URL**: `https://staging.mydomain.com/backend1`
 - **Namespace**: `staging`
 - **Auto-deploy**: ✅ On push
 
 ### Production Environment
 - **Branch**: `main`
-- **URL**: `https://production.mydomain.com/backend2`
+- **URL**: `https://production.mydomain.com/backend1`
 - **Namespace**: `production`
 - **Auto-deploy**: ✅ On push
 
@@ -95,39 +98,39 @@ jobs:
 ### Health Endpoints
 ```bash
 # Application health
-curl https://dev.mydomain.com/backend2/health
+curl https://dev.mydomain.com/backend1/actuator/health
 
 # Application status
-curl https://dev.mydomain.com/backend2/api/status
+curl https://dev.mydomain.com/backend1/api/status
 
 # Metrics (Prometheus)
-curl https://dev.mydomain.com/backend2/metrics
+curl https://dev.mydomain.com/backend1/actuator/prometheus
 ```
 
 ### Kubernetes Resources
 ```bash
 # Check deployment status
-kubectl get deployment nodejs-backend2-dev -n dev
+kubectl get deployment java-backend1-dev -n dev
 
 # Check pod logs
-kubectl logs -f deployment/nodejs-backend2-dev -n dev
+kubectl logs -f deployment/java-backend1-dev -n dev
 
 # Check service status
-kubectl get service nodejs-backend2-dev -n dev
+kubectl get service java-backend1-dev -n dev
 ```
 
 ## 🎯 **Service Endpoints**
 
-### Analytics API
+### User Management API
 ```bash
-# Get analytics
-curl https://dev.mydomain.com/backend2/api/users
+# Get users
+curl https://dev.mydomain.com/backend1/api/users
 
 # Health check
-curl https://dev.mydomain.com/backend2/health
+curl https://dev.mydomain.com/backend1/actuator/health
 
 # Service status
-curl https://dev.mydomain.com/backend2/api/status
+curl https://dev.mydomain.com/backend1/api/status
 ```
 
 ## 🔐 **Authentication & Secrets**
@@ -159,11 +162,11 @@ If deployment fails or issues are detected:
 
 ```bash
 # Quick rollback using Helm
-helm rollback nodejs-backend2-production --namespace production
+helm rollback java-backend1-production --namespace production
 
 # Or use the centralized rollback workflow
 gh workflow run rollback-deployment.yml \
-  -f application_name=nodejs-backend2 \
+  -f application_name=java-backend1 \
   -f environment=production \
   -f revision=previous
 ```
@@ -181,10 +184,10 @@ gh workflow run rollback-deployment.yml \
 2. **Deployment Issues**
    ```bash
    # Check Helm release status
-   helm status nodejs-backend2-dev -n dev
+   helm status java-backend1-dev -n dev
    
    # Check pod events
-   kubectl describe pod -l app=nodejs-backend2 -n dev
+   kubectl describe pod -l app=java-backend1 -n dev
    ```
 
 3. **Service Unavailable**
@@ -193,7 +196,7 @@ gh workflow run rollback-deployment.yml \
    kubectl get ingress -n dev
    
    # Verify service endpoints
-   kubectl get endpoints nodejs-backend2-dev -n dev
+   kubectl get endpoints java-backend1-dev -n dev
    ```
 
 ## 📞 **Support**
@@ -207,7 +210,7 @@ For deployment issues:
 
 ---
 
-**🏗️ Service**: Analytics Service  
-**🔗 Repository**: `/apps/nodejs-backend2/`  
+**🏗️ Service**: User Management Service  
+**🔗 Repository**: `/`  
 **📊 Monitoring**: Prometheus + Grafana  
 **🚀 Deployment**: GitHub Actions + Helm
