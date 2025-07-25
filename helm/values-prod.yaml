@@ -1,6 +1,9 @@
 # Production environment values for java-backend1
 global:
-  environment: production
+  environment: prod
+  # Blue-Green deployment support
+  blueGreenEnabled: true
+  deploymentSlot: "{{ .Values.global.deploymentSlot | default \"blue\" }}"
   applicationName: java-backend1
   applicationType: java-springboot
 
@@ -8,14 +11,19 @@ replicaCount: 3
 
 image:
   repository: myregistry.azurecr.io/java-backend1
-  tag: "production-latest"
+  tag: "prod-latest"
 
 ingress:
   enabled: true
   pathPrefix: "backend1"
   proxyBodySize: "1024m"
   hosts:
-    - host: production.mydomain.com
+    - host: api.mydomain.com
+  # Blue-Green ingress configuration
+  blueGreen:
+    canaryWeight: 0
+    canaryHeader: "X-Canary-Deploy"
+    canaryHeaderValue: "green"
 
 resources:
   limits:
@@ -27,15 +35,17 @@ resources:
 
 env:
   - name: ENVIRONMENT
-    value: "production"
+    value: "prod"
   - name: APPLICATION_NAME
     value: "java-backend1"
   - name: SERVER_PORT
     value: "8080"
   - name: SPRING_PROFILES_ACTIVE
-    value: "production"
+    value: "prod"
   - name: LOG_LEVEL
     value: "WARN"
+  - name: DEPLOYMENT_SLOT
+    value: "{{ .Values.global.deploymentSlot | default \"blue\" }}"
 
 autoscaling:
   enabled: true

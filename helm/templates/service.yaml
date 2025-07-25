@@ -5,6 +5,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "java-backend1.labels" . | nindent 4 }}
+    {{- if and (eq .Values.global.environment "prod") .Values.global.blueGreenEnabled }}
+    deployment-slot: {{ .Values.global.deploymentSlot | default "blue" }}
+    {{- end }}
   {{- with .Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -24,3 +27,6 @@ spec:
     {{- end }}
   selector:
     {{- include "java-backend1.selectorLabels" . | nindent 4 }}
+    {{- if and (eq .Values.global.environment "prod") .Values.global.blueGreenEnabled }}
+    deployment-slot: {{ .Values.global.deploymentSlot | default "blue" }}
+    {{- end }}

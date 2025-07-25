@@ -5,6 +5,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "java-backend1.labels" . | nindent 4 }}
+    {{- if and (eq .Values.global.environment "prod") .Values.global.blueGreenEnabled }}
+    deployment-slot: {{ .Values.global.deploymentSlot | default "blue" }}
+    {{- end }}
   annotations:
     deployment.kubernetes.io/revision: "{{ .Release.Revision }}"
     app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -29,6 +32,9 @@ spec:
         {{- end }}
       labels:
         {{- include "java-backend1.selectorLabels" . | nindent 8 }}
+        {{- if and (eq .Values.global.environment "prod") .Values.global.blueGreenEnabled }}
+        deployment-slot: {{ .Values.global.deploymentSlot | default "blue" }}
+        {{- end }}
         {{- if .Values.azureKeyVault.enabled }}
         azure.workload.identity/use: "true"
         {{- end }}
