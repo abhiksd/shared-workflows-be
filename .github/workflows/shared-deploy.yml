@@ -1,4 +1,9 @@
 name: Shared AKS Deployment Workflow
+
+# AKS Cluster Configuration:
+# Update the AKS cluster names and resource groups in the validate-environment job
+# under the case statement for each environment (dev, staging, production)
+
 permissions:
   id-token: write
   contents: read
@@ -91,8 +96,8 @@ jobs:
             "dev")
               if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_DEV }}"
-                AKS_RG="${{ vars.AKS_RESOURCE_GROUP_DEV }}"
+                AKS_CLUSTER="aks-dev-cluster"
+                AKS_RG="rg-aks-dev"
                 echo "✅ Dev deployment approved: develop branch or manual trigger"
               else
                 echo "❌ Dev deployment blocked: must be develop branch or manual trigger"
@@ -101,8 +106,8 @@ jobs:
             "staging")
               if [[ "$GITHUB_REF" == "refs/heads/main" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_SQE }}"
-                AKS_RG="${{ vars.AKS_RESOURCE_GROUP_SQE }}"
+                AKS_CLUSTER="aks-staging-cluster"
+                AKS_RG="rg-aks-staging"
                 echo "✅ Staging deployment approved: main branch or manual trigger"
               else
                 echo "❌ Staging deployment blocked: must be main branch or manual trigger"
@@ -111,8 +116,8 @@ jobs:
             "production")
               if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_PROD }}"
-                AKS_RG="${{ vars.AKS_RESOURCE_GROUP_PROD }}"
+                AKS_CLUSTER="aks-prod-cluster"
+                AKS_RG="rg-aks-prod"
                 echo "✅ Production deployment approved: release branch, tag, or manual trigger"
               else
                 echo "❌ Production deployment blocked: must be release branch, tag, or manual trigger"
@@ -130,18 +135,18 @@ jobs:
           echo "   - AKS cluster name: $AKS_CLUSTER"
           echo "   - AKS resource group: $AKS_RG"
           
-          # Validate that secrets are available for valid environments
+          # Validate that AKS cluster configuration is properly set
           if [ "$TARGET_ENV" != "unknown" ] && [ "$TARGET_ENV" != "" ]; then
             if [ -z "$AKS_CLUSTER" ]; then
               echo "❌ ERROR: AKS cluster name is empty for environment $TARGET_ENV"
-              echo "Check that AKS_CLUSTER_NAME_${TARGET_ENV^^} repository variable is set"
+              echo "Check the AKS cluster configuration in the shared workflow"
               if [ "$SHOULD_DEPLOY" == "true" ]; then
                 exit 1
               fi
             fi
             if [ -z "$AKS_RG" ]; then
               echo "❌ ERROR: AKS resource group is empty for environment $TARGET_ENV"
-              echo "Check that AKS_RESOURCE_GROUP_${TARGET_ENV^^} repository variable is set"
+              echo "Check the AKS resource group configuration in the shared workflow"
               if [ "$SHOULD_DEPLOY" == "true" ]; then
                 exit 1
               fi
