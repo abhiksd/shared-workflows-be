@@ -1,8 +1,8 @@
 name: Shared AKS Deployment Workflow
 
 # AKS Cluster Configuration:
-# Update the AKS cluster names and resource groups in the validate-environment job
-# under the case statement for each environment (dev, staging, production)
+# Update the environment variables in the 'env' section below to change AKS cluster settings
+# No need to modify multiple locations - all environments reference these centralized values
 
 permissions:
   id-token: write
@@ -47,6 +47,13 @@ on:
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  # AKS Cluster Configuration - Update these values to change cluster settings
+  AKS_CLUSTER_NAME_DEV: "aks-dev-cluster"
+  AKS_RESOURCE_GROUP_DEV: "rg-aks-dev"
+  AKS_CLUSTER_NAME_STAGING: "aks-staging-cluster"
+  AKS_RESOURCE_GROUP_STAGING: "rg-aks-staging"
+  AKS_CLUSTER_NAME_PROD: "aks-prod-cluster"
+  AKS_RESOURCE_GROUP_PROD: "rg-aks-prod"
   
 jobs:
   validate-environment:
@@ -96,8 +103,8 @@ jobs:
             "dev")
               if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-dev-cluster"
-                AKS_RG="rg-aks-dev"
+                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_DEV }}"
+                AKS_RG="${{ env.AKS_RESOURCE_GROUP_DEV }}"
                 echo "✅ Dev deployment approved: develop branch or manual trigger"
               else
                 echo "❌ Dev deployment blocked: must be develop branch or manual trigger"
@@ -106,8 +113,8 @@ jobs:
             "staging")
               if [[ "$GITHUB_REF" == "refs/heads/main" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-staging-cluster"
-                AKS_RG="rg-aks-staging"
+                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_STAGING }}"
+                AKS_RG="${{ env.AKS_RESOURCE_GROUP_STAGING }}"
                 echo "✅ Staging deployment approved: main branch or manual trigger"
               else
                 echo "❌ Staging deployment blocked: must be main branch or manual trigger"
@@ -116,8 +123,8 @@ jobs:
             "production")
               if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-prod-cluster"
-                AKS_RG="rg-aks-prod"
+                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PROD }}"
+                AKS_RG="${{ env.AKS_RESOURCE_GROUP_PROD }}"
                 echo "✅ Production deployment approved: release branch, tag, or manual trigger"
               else
                 echo "❌ Production deployment blocked: must be release branch, tag, or manual trigger"
