@@ -615,6 +615,119 @@ az network public-ip create \
 echo "Network security configured"
 ```
 
+## 🌐 **Azure Application Gateway Setup (SSL Termination)**
+
+### **Create Application Gateway for SSL Termination**
+```bash
+# Create public IP for Application Gateway
+APP_GW_NAME="appgw-${PROJECT_NAME}-prod"
+APP_GW_RG="rg-${PROJECT_NAME}-prod"
+
+az network public-ip create \
+  --resource-group "$APP_GW_RG" \
+  --name "pip-${APP_GW_NAME}" \
+  --location "$LOCATION" \
+  --allocation-method Static \
+  --sku Standard \
+  --dns-name "${PROJECT_NAME}-appgw"
+
+# Get public IP address
+APP_GW_IP=$(az network public-ip show --resource-group "$APP_GW_RG" --name "pip-${APP_GW_NAME}" --query ipAddress --output tsv)
+echo "Application Gateway Public IP: $APP_GW_IP"
+```
+
+### **Configure Application Gateway with NGINX Backend**
+```bash
+# Get NGINX ingress controller IP (LoadBalancer IP)
+NGINX_INGRESS_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "NGINX Ingress IP: $NGINX_INGRESS_IP"
+
+# Create Application Gateway
+az network application-gateway create \
+  --resource-group "$APP_GW_RG" \
+  --name "$APP_GW_NAME" \
+  --location "$LOCATION" \
+  --capacity 2 \
+  --sku Standard_v2 \
+  --public-ip-address "pip-${APP_GW_NAME}" \
+  --vnet-name "vnet-${PROJECT_NAME}-prod" \
+  --subnet "subnet-appgw" \
+  --servers "$NGINX_INGRESS_IP" \
+  --http-settings-cookie-based-affinity Disabled \
+  --http-settings-port 80 \
+  --http-settings-protocol Http \
+  --frontend-port 443 \
+  --http2 Enabled
+
+echo "Application Gateway created successfully"
+```
+
+### **Configure SSL Certificate on Application Gateway**
+```bash
+# Option 1: Upload custom SSL certificate
+az network application-gateway ssl-cert create \
+  --resource-group "$APP_GW_RG" \
+  --gateway-name "$APP_GW_NAME" \
+  --name "ssl-cert-${PROJECT_NAME}" \
+  --cert-file "/path/to/your/certificate.pfx" \
+  --cert-password "your-certificate-password"
+
+# Option 2: Use managed certificate (if using custom domain)
+# Configure custom domain and managed certificate through Azure Portal
+
+# Create HTTPS listener
+az network application-gateway http-listener create \
+  --resource-group "$APP_GW_RG" \
+  --gateway-name "$APP_GW_NAME" \
+  --name "https-listener" \
+  --frontend-port "appGatewayFrontendPort443" \
+  --ssl-cert "ssl-cert-${PROJECT_NAME}"
+
+# Create routing rule for HTTPS
+az network application-gateway rule create \
+  --resource-group "$APP_GW_RG" \
+  --gateway-name "$APP_GW_NAME" \
+  --name "https-rule" \
+  --http-listener "https-listener" \
+  --rule-type Basic \
+  --address-pool "appGatewayBackendPool" \
+  --http-settings "appGatewayBackendHttpSettings"
+```
+
+### **Configure Health Probes**
+```bash
+# Create custom health probe for backend health
+az network application-gateway probe create \
+  --resource-group "$APP_GW_RG" \
+  --gateway-name "$APP_GW_NAME" \
+  --name "health-probe" \
+  --protocol Http \
+  --host-name-from-http-settings true \
+  --path "/backend1/actuator/health" \
+  --interval 30 \
+  --timeout 30 \
+  --threshold 3
+
+# Update backend HTTP settings to use custom probe
+az network application-gateway http-settings update \
+  --resource-group "$APP_GW_RG" \
+  --gateway-name "$APP_GW_NAME" \
+  --name "appGatewayBackendHttpSettings" \
+  --probe "health-probe"
+
+echo "Health probes configured"
+```
+
+### **DNS Configuration**
+```bash
+# Update DNS to point to Application Gateway public IP
+echo "Configure your DNS records:"
+echo "  A Record: api.mydomain.com -> $APP_GW_IP"
+echo "  A Record: preprod.mydomain.com -> $APP_GW_IP"
+echo "  A Record: dev.mydomain.com -> $APP_GW_IP"
+echo "  A Record: sqe.mydomain.com -> $APP_GW_IP"
+```
+
 ## 📊 **Monitoring & Logging Setup**
 
 ### **Configure Azure Monitor**
@@ -828,12 +941,13 @@ echo "=========================="
 ```
 
 ### **Next Steps**
-1. ✅ Configure your domain DNS to point to NGINX ingress IPs
-2. ✅ Update Helm chart values with your actual domain names
-3. ✅ Configure SSL certificates (Let's Encrypt or Azure Key Vault certificates)
-4. ✅ Test the complete CI/CD pipeline
-5. ✅ Configure backup and disaster recovery
-6. ✅ Set up monitoring dashboards
+1. ✅ Configure Azure Application Gateway for SSL termination
+2. ✅ Point Application Gateway backend pools to NGINX ingress IPs
+3. ✅ Update Helm chart values with your actual domain names
+4. ✅ Configure SSL certificates on Application Gateway
+5. ✅ Test the complete CI/CD pipeline
+6. ✅ Configure backup and disaster recovery
+7. ✅ Set up monitoring dashboards
 
 ### **Cleanup Script (Use with caution!)**
 ```bash

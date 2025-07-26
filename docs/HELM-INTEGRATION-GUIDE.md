@@ -478,23 +478,14 @@ metadata:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     nginx.ingress.kubernetes.io/use-regex: "true"
-    {{- if .Values.ingress.ssl.enabled }}
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    {{- if .Values.ingress.ssl.letsencrypt }}
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    {{- end }}
-    {{- end }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    # SSL termination handled by Azure Application Gateway
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  {{- if .Values.ingress.ssl.enabled }}
-  tls:
-    - hosts:
-        - {{ include "java-backend1.ingressHost" . }}
-      secretName: {{ include "java-backend1.fullname" . }}-tls
-  {{- end }}
+  # SSL termination handled by Azure Application Gateway - no TLS config needed
   rules:
     - host: {{ include "java-backend1.ingressHost" . }}
       http:
@@ -621,9 +612,7 @@ ingress:
   enabled: true
   className: nginx
   annotations: {}
-  ssl:
-    enabled: true
-    letsencrypt: true
+  # SSL termination handled by Azure Application Gateway
 
 # Database configuration
 database:

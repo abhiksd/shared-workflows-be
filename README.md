@@ -153,10 +153,15 @@ graph LR
 ### **Traffic Routing**
 ```yaml
 Production Traffic Flow:
-  api.mydomain.com → NGINX Ingress (default namespace) → Active Slot Namespace
+  Client → Azure Application Gateway (SSL termination) → NGINX Ingress (HTTP) → Active Slot Namespace
   
 Pre-Production Traffic Flow:
-  preprod.mydomain.com → NGINX Ingress (default namespace) → Active Slot Namespace
+  Client → Azure Application Gateway (SSL termination) → NGINX Ingress (HTTP) → Active Slot Namespace
+
+Architecture:
+  - Azure Application Gateway: SSL termination, WAF protection
+  - NGINX Ingress: HTTP routing, Blue-Green traffic switching
+  - Namespaces: Blue/Green slot isolation
 
 Slot Determination:
   - Blue Slot: prod-java-backend1-blue namespace
