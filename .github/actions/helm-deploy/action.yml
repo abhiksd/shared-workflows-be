@@ -274,11 +274,11 @@ runs:
 
     - name: Setup Kubernetes namespace with enhanced labeling
       run: |
-        NAMESPACE="${{ inputs.environment }}-${{ inputs.application_name }}"
+        NAMESPACE="${{ inputs.environment }}"
         
         echo "🏗️  Setting up Kubernetes namespace with enhanced metadata..."
         echo "========================================================"
-        echo "   - Namespace: $NAMESPACE"
+        echo "   - Namespace: $NAMESPACE (matches environment name)"
         echo "   - Environment: ${{ inputs.environment }}"
         echo "   - Application: ${{ inputs.application_name }}"
         echo ""

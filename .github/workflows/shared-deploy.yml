@@ -84,11 +84,11 @@ jobs:
           
           # Auto-detect environment if 'auto' is specified
           if [[ "$ENVIRONMENT" == "auto" ]]; then
-            if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+            if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]]; then
               TARGET_ENV="dev"
-            elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            elif [[ "$GITHUB_REF" == "refs/heads/sqe" ]]; then
               TARGET_ENV="sqe"
-            elif [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            elif [[ "$GITHUB_REF" == "refs/heads/ppr" ]] || [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
               TARGET_ENV="ppr"
             elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
               TARGET_ENV="prod"
@@ -105,33 +105,33 @@ jobs:
           # Validate deployment rules based on target environment
           case "$TARGET_ENV" in
             "dev")
-              if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_DEV }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_DEV }}"
-                echo "✅ Dev deployment approved: develop branch or manual trigger"
+                echo "✅ Dev deployment approved: dev/develop branch or manual trigger"
               else
-                echo "❌ Dev deployment blocked: must be develop branch or manual trigger"
+                echo "❌ Dev deployment blocked: must be dev/develop branch or manual trigger"
               fi
               ;;
             "sqe")
-              if [[ "$GITHUB_REF" == "refs/heads/main" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/sqe" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_SQE }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_SQE }}"
-                echo "✅ SQE deployment approved: main branch or manual trigger"
+                echo "✅ SQE deployment approved: sqe branch or manual trigger"
               else
-                echo "❌ SQE deployment blocked: must be main branch or manual trigger"
+                echo "❌ SQE deployment blocked: must be sqe branch or manual trigger"
               fi
               ;;
             "ppr")
-              if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/ppr" ]] || [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PPR }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_PPR }}"
-                echo "✅ Pre-Prod deployment approved: release branch or manual trigger"
+                echo "✅ Pre-Prod deployment approved: ppr/release branch or manual trigger"
               else
-                echo "❌ Pre-Prod deployment blocked: must be release branch or manual trigger"
+                echo "❌ Pre-Prod deployment blocked: must be ppr/release branch or manual trigger"
               fi
               ;;
             "prod")
