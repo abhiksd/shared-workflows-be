@@ -28,7 +28,7 @@ jobs:
     name: Security Analysis
     uses: ./.github/workflows/shared-security-scan.yml
     with:
-      application_name: java-backend1
+              application_name: my-app
       application_type: java-springboot
       build_context: .
       java_version: '21'

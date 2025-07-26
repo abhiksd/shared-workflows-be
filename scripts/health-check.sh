@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Health Check Script for Java Backend1 Blue-Green Deployment
+# Health Check Script for My App Blue-Green Deployment
 # Usage: ./scripts/health-check.sh [namespace] [timeout]
 
-NAMESPACE=${1:-"prod-java-backend1-blue"}
+NAMESPACE=${1:-"prod-my-app-blue"}
 MAX_RETRIES=${2:-30}
 RETRY_INTERVAL=10
-APP_NAME="java-backend1"
+APP_NAME="my-app"
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,18 +35,18 @@ log_error() {
 # Help function
 show_help() {
     cat << EOF
-🔍 Health Check Script for Java Backend1
+🔍 Health Check Script for My App
 
 Usage: $0 [NAMESPACE] [MAX_RETRIES]
 
 Parameters:
-  NAMESPACE     Kubernetes namespace to check (default: prod-java-backend1-blue)
+  NAMESPACE     Kubernetes namespace to check (default: prod-my-app-blue)
   MAX_RETRIES   Maximum number of health check attempts (default: 30)
 
 Examples:
   $0                                          # Check blue namespace with default retries
-  $0 prod-java-backend1-green                 # Check green namespace
-  $0 prod-java-backend1-blue 60              # Check blue namespace with 60 retries
+  $0 prod-my-app-green                 # Check green namespace
+  $0 prod-my-app-blue 60              # Check blue namespace with 60 retries
   $0 --help                                   # Show this help
 
 Health Checks Performed:
@@ -57,11 +57,11 @@ Health Checks Performed:
   5. Resource usage monitoring
 
 Environment Options:
-  prod-java-backend1-blue     Production blue namespace
-  prod-java-backend1-green    Production green namespace
-  sqe-java-backend1          SQE environment
-  ppr-java-backend1          Pre-production environment
-  dev-java-backend1          Development environment
+  prod-my-app-blue     Production blue namespace
+prod-my-app-green    Production green namespace
+sqe-my-app          SQE environment
+ppr-my-app          Pre-production environment
+dev-my-app          Development environment
 EOF
 }
 
@@ -111,7 +111,7 @@ check_namespace() {
         # Show available namespaces
         echo ""
         echo "Available namespaces:"
-        kubectl get namespaces | grep -E "(NAME|java-backend1|default)"
+        kubectl get namespaces | grep -E "(NAME|my-app|default)"
         
         return 1
     fi
@@ -209,25 +209,25 @@ check_application_health() {
     
     # Test health endpoint
     local health_status
-    health_status=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s -f http://localhost:8080/actuator/health 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
+    health_status=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s -f http://localhost:8280/my-app/actuator/health 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
     
     echo "  Health Status: $health_status"
     
     # Test readiness endpoint
     local readiness_status
-    readiness_status=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s -f http://localhost:8080/actuator/health/readiness 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
+    readiness_status=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s -f http://localhost:8280/my-app/actuator/health/readiness 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
     
     echo "  Readiness Status: $readiness_status"
     
     # Test liveness endpoint
     local liveness_status
-    liveness_status=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s -f http://localhost:8080/actuator/health/liveness 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
+    liveness_status=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s -f http://localhost:8280/my-app/actuator/health/liveness 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
     
     echo "  Liveness Status: $liveness_status"
     
     # Get application info
     local app_version
-    app_version=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s http://localhost:8080/actuator/info 2>/dev/null | jq -r '.build.version // .git.commit.id // "unknown"' 2>/dev/null || echo "unknown")
+    app_version=$(kubectl exec -n "$NAMESPACE" "$pod_name" -- curl -s http://localhost:8280/my-app/actuator/info 2>/dev/null | jq -r '.build.version // .git.commit.id // "unknown"' 2>/dev/null || echo "unknown")
     
     echo "  Application Version: $app_version"
     
@@ -312,7 +312,7 @@ show_summary() {
 
 # Main execution
 main() {
-    echo "🔍 Java Backend1 Health Check"
+    echo "🔍 My App Health Check"
     echo "=============================="
     echo ""
     

@@ -45,7 +45,7 @@ jobs:
     uses: ./.github/workflows/shared-deploy.yml@shared-github-actions
     with:
       environment: ${{ github.event.inputs.environment || 'auto' }}
-      application_name: java-backend1
+      application_name: my-app
       application_type: java-springboot
       build_context: .
       dockerfile_path: ./Dockerfile

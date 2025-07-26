@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Blue-Green Deployment Script for Java Backend1
+# Blue-Green Deployment Script for My App
 # Usage: ./scripts/deploy.sh [environment] [force_deploy]
 
 ENVIRONMENT=${1:-"dev"}
@@ -36,7 +36,7 @@ log_error() {
 # Help function
 show_help() {
     cat << EOF
-🚀 Blue-Green Deployment Script for Java Backend1
+🚀 Blue-Green Deployment Script for My App
 
 Usage: $0 [ENVIRONMENT] [FORCE_DEPLOY]
 

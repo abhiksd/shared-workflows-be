@@ -57,15 +57,15 @@ env:
   BLUE_GREEN_ENABLED: true
   
   # AKS Cluster Configuration (centralized)
-  AKS_CLUSTER_DEV: "aks-java-backend1-dev"
-  AKS_CLUSTER_SQE: "aks-java-backend1-sqe"
-  AKS_CLUSTER_PPR: "aks-java-backend1-ppr"
-  AKS_CLUSTER_PROD: "aks-java-backend1-prod"
+  AKS_CLUSTER_DEV: "aks-my-app-dev"
+  AKS_CLUSTER_SQE: "aks-my-app-sqe"
+  AKS_CLUSTER_PPR: "aks-my-app-ppr"
+  AKS_CLUSTER_PROD: "aks-my-app-prod"
   
-  AKS_RESOURCE_GROUP_DEV: "rg-java-backend1-dev"
-  AKS_RESOURCE_GROUP_SQE: "rg-java-backend1-sqe"
-  AKS_RESOURCE_GROUP_PPR: "rg-java-backend1-ppr"
-  AKS_RESOURCE_GROUP_PROD: "rg-java-backend1-prod"
+  AKS_RESOURCE_GROUP_DEV: "rg-my-app-dev"
+  AKS_RESOURCE_GROUP_SQE: "rg-my-app-sqe"
+  AKS_RESOURCE_GROUP_PPR: "rg-my-app-ppr"
+  AKS_RESOURCE_GROUP_PROD: "rg-my-app-prod"
 
 jobs:
   # Environment validation and setup

@@ -4,7 +4,7 @@
 # Usage: ./scripts/monitor-deployment.sh [refresh_interval]
 
 REFRESH_INTERVAL=${1:-5}
-APP_NAME="java-backend1"
+APP_NAME="my-app"
 DOMAIN=${DOMAIN:-"api.mydomain.com"}
 
 # Colors for output
@@ -54,8 +54,8 @@ Controls:
   'r' + Enter         Force refresh
 
 Namespaces Monitored:
-  - prod-java-backend1-blue
-  - prod-java-backend1-green
+  - prod-my-app-blue
+- prod-my-app-green
   - Default namespace (for ingress)
 EOF
 }
@@ -181,14 +181,14 @@ get_ingress_status() {
     local canary_enabled="false"
     
     # Check main ingress
-    if kubectl get ingress prod-java-backend1-ingress -n default &> /dev/null; then
-        main_ingress_ns=$(kubectl get ingress prod-java-backend1-ingress -n default -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.namespace}' 2>/dev/null || echo "unknown")
+    if kubectl get ingress my-app-ingress -n default &> /dev/null; then
+        main_ingress_ns=$(kubectl get ingress my-app-ingress -n default -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.namespace}' 2>/dev/null || echo "unknown")
     fi
     
     # Check canary ingress
-    if kubectl get ingress prod-java-backend1-ingress-canary -n default &> /dev/null; then
-        canary_weight=$(kubectl get ingress prod-java-backend1-ingress-canary -n default -o jsonpath='{.metadata.annotations.nginx\.ingress\.kubernetes\.io/canary-weight}' 2>/dev/null || echo "0")
-        local canary_annotation=$(kubectl get ingress prod-java-backend1-ingress-canary -n default -o jsonpath='{.metadata.annotations.nginx\.ingress\.kubernetes\.io/canary}' 2>/dev/null || echo "false")
+    if kubectl get ingress my-app-ingress-canary -n default &> /dev/null; then
+        canary_weight=$(kubectl get ingress my-app-ingress-canary -n default -o jsonpath='{.metadata.annotations.nginx\.ingress\.kubernetes\.io/canary-weight}' 2>/dev/null || echo "0")
+        local canary_annotation=$(kubectl get ingress my-app-ingress-canary -n default -o jsonpath='{.metadata.annotations.nginx\.ingress\.kubernetes\.io/canary}' 2>/dev/null || echo "false")
         if [[ "$canary_annotation" == "true" ]]; then
             canary_enabled="true"
         fi
@@ -208,7 +208,7 @@ get_app_health() {
     
     if [[ -n "$pod_name" ]]; then
         local start_time=$(date +%s%N)
-        health_status=$(kubectl exec -n "$namespace" "$pod_name" -- curl -s -f http://localhost:8080/actuator/health 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
+        health_status=$(kubectl exec -n "$namespace" "$pod_name" -- curl -s -f http://localhost:8280/my-app/actuator/health 2>/dev/null | jq -r '.status' 2>/dev/null || echo "UNKNOWN")
         local end_time=$(date +%s%N)
         
         if [[ "$health_status" != "UNKNOWN" ]]; then
@@ -227,7 +227,7 @@ get_external_health() {
     
     if command -v curl &> /dev/null; then
         local start_time=$(date +%s%N)
-        local response=$(curl -s -w "%{http_code}" --connect-timeout 5 --max-time 10 "https://$DOMAIN/actuator/health" 2>/dev/null)
+        local response=$(curl -s -w "%{http_code}" --connect-timeout 5 --max-time 10 "https://$DOMAIN/my-app/actuator/health" 2>/dev/null)
         local end_time=$(date +%s%N)
         
         http_code="${response: -3}"
@@ -276,18 +276,18 @@ display_status() {
     # Namespaces status
     echo -e "${CYAN}🏗️  Namespace Status:${NC}"
     echo -n "   Blue:  "
-    get_namespace_status "prod-java-backend1-blue"
+    get_namespace_status "prod-my-app-blue"
     echo -n "   Green: "
-    get_namespace_status "prod-java-backend1-green"
+    get_namespace_status "prod-my-app-green"
     echo ""
     
     # Pod details
     echo -e "${CYAN}📦 Pod Details:${NC}"
-    echo -e "   ${BLUE_CIRCLE} Blue Namespace (prod-java-backend1-blue):${NC}"
-    get_pod_details "prod-java-backend1-blue"
+    echo -e "   ${BLUE_CIRCLE} Blue Namespace (prod-my-app-blue):${NC}"
+    get_pod_details "prod-my-app-blue"
     echo ""
-    echo -e "   ${GREEN_CIRCLE} Green Namespace (prod-java-backend1-green):${NC}"
-    get_pod_details "prod-java-backend1-green"
+    echo -e "   ${GREEN_CIRCLE} Green Namespace (prod-my-app-green):${NC}"
+    get_pod_details "prod-my-app-green"
     echo ""
     
     # Ingress and traffic routing
@@ -297,9 +297,9 @@ display_status() {
     local canary_weight=$(echo "$ingress_info" | cut -d'|' -f2)
     local canary_enabled=$(echo "$ingress_info" | cut -d'|' -f3)
     
-    if [[ "$active_ns" == "prod-java-backend1-blue" ]]; then
+    if [[ "$active_ns" == "prod-my-app-blue" ]]; then
         echo -e "   Active Namespace: ${BLUE_CIRCLE} Blue ($active_ns)"
-    elif [[ "$active_ns" == "prod-java-backend1-green" ]]; then
+    elif [[ "$active_ns" == "prod-my-app-green" ]]; then
         echo -e "   Active Namespace: ${GREEN_CIRCLE} Green ($active_ns)"
     else
         echo -e "   Active Namespace: ${RED_CIRCLE} Unknown ($active_ns)"
@@ -322,7 +322,7 @@ display_status() {
     echo -e "${CYAN}💚 Application Health:${NC}"
     
     # Blue namespace health
-    local blue_health_info=$(get_app_health "prod-java-backend1-blue")
+    local blue_health_info=$(get_app_health "prod-my-app-blue")
     local blue_health=$(echo "$blue_health_info" | cut -d'|' -f1)
     local blue_response_time=$(echo "$blue_health_info" | cut -d'|' -f2)
     
@@ -333,7 +333,7 @@ display_status() {
     fi
     
     # Green namespace health
-    local green_health_info=$(get_app_health "prod-java-backend1-green")
+    local green_health_info=$(get_app_health "prod-my-app-green")
     local green_health=$(echo "$green_health_info" | cut -d'|' -f1)
     local green_response_time=$(echo "$green_health_info" | cut -d'|' -f2)
     
@@ -386,14 +386,14 @@ display_status() {
     echo -e "${CYAN}📊 Resource Usage:${NC}"
     if kubectl top node &> /dev/null; then
         echo "   Blue Namespace:"
-        kubectl top pod -n prod-java-backend1-blue --no-headers 2>/dev/null | head -3 | while read -r line; do
+        kubectl top pod -n prod-my-app-blue --no-headers 2>/dev/null | head -3 | while read -r line; do
             if [[ -n "$line" ]]; then
                 echo "     $line"
             fi
         done
         
         echo "   Green Namespace:"
-        kubectl top pod -n prod-java-backend1-green --no-headers 2>/dev/null | head -3 | while read -r line; do
+        kubectl top pod -n prod-my-app-green --no-headers 2>/dev/null | head -3 | while read -r line; do
             if [[ -n "$line" ]]; then
                 echo "     $line"
             fi

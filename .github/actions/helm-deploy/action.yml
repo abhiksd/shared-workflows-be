@@ -57,20 +57,20 @@ runs:
       run: |
         case "${{ inputs.environment }}" in
           "dev")
-            AKS_CLUSTER="aks-java-backend1-dev"
-            AKS_RG="rg-java-backend1-dev"
+            AKS_CLUSTER="aks-my-app-dev"
+            AKS_RG="rg-my-app-dev"
             ;;
           "sqe")
-            AKS_CLUSTER="aks-java-backend1-sqe"
-            AKS_RG="rg-java-backend1-sqe"
+            AKS_CLUSTER="aks-my-app-sqe"
+            AKS_RG="rg-my-app-sqe"
             ;;
           "ppr")
-            AKS_CLUSTER="aks-java-backend1-ppr"
-            AKS_RG="rg-java-backend1-ppr"
+            AKS_CLUSTER="aks-my-app-ppr"
+            AKS_RG="rg-my-app-ppr"
             ;;
           "prod")
-            AKS_CLUSTER="aks-java-backend1-prod"
-            AKS_RG="rg-java-backend1-prod"
+            AKS_CLUSTER="aks-my-app-prod"
+            AKS_RG="rg-my-app-prod"
             ;;
           *)
             echo "❌ Unsupported environment: ${{ inputs.environment }}"
@@ -161,7 +161,7 @@ runs:
         fi
         
         kubectl patch ingress ${APP_NAME}-ingress -n default --type='merge' \
-          -p='{"spec":{"rules":[{"host":"'${INGRESS_HOST}'","http":{"paths":[{"path":"/(backend1/|$)(.*)","pathType":"ImplementationSpecific","backend":{"service":{"name":"'${APP_NAME}'","namespace":"'${NAMESPACE}'","port":{"number":8080}}}}]}}]}}'
+          -p='{"spec":{"rules":[{"host":"'${INGRESS_HOST}'","http":{"paths":[{"path":"/(my-app/|$)(.*)","pathType":"ImplementationSpecific","backend":{"service":{"name":"'${APP_NAME}'","namespace":"'${NAMESPACE}'","port":{"number":8280}}}}]}}]}}'
         
         # Update active slot label
         kubectl label ingress ${APP_NAME}-ingress -n default active-slot=${TARGET_SLOT} --overwrite
@@ -180,7 +180,7 @@ runs:
         
         # Test health endpoint
         echo "Testing health endpoint..."
-        if kubectl exec -n $NAMESPACE deployment/${{ inputs.application_name }} -- curl -f http://localhost:8080/backend1/actuator/health; then
+        if kubectl exec -n $NAMESPACE deployment/${{ inputs.application_name }} -- curl -f http://localhost:8280/my-app/actuator/health; then
           echo "✅ Health check passed"
         else
           echo "❌ Health check failed"
