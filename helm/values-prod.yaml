@@ -19,11 +19,7 @@ ingress:
   proxyBodySize: "1024m"
   hosts:
     - host: api.mydomain.com
-  # Blue-Green ingress configuration
-  blueGreen:
-    canaryWeight: 0
-    canaryHeader: "X-Canary-Deploy"
-    canaryHeaderValue: "green"
+
 
 resources:
   limits:

@@ -52,44 +52,5 @@ spec:
                   number: {{ $svcPort }}
     {{- end }}
 
-{{- if $isBlueGreenEnabled }}
----
-# Canary Ingress for Blue-Green Traffic Shifting
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{ $fullName }}-ingress-canary
-  namespace: default
-  labels:
-    {{- include "java-backend1.labels" . | nindent 4 }}
-    canary-slot: {{ if eq $deploymentSlot "blue" }}green{{ else }}blue{{ end }}
-  annotations:
-    nginx.ingress.kubernetes.io/canary: "true"
-    nginx.ingress.kubernetes.io/canary-weight: "{{ .Values.ingress.blueGreen.canaryWeight | default 0 }}"
-    {{- if .Values.ingress.blueGreen.canaryHeader }}
-    nginx.ingress.kubernetes.io/canary-by-header: "{{ .Values.ingress.blueGreen.canaryHeader }}"
-    nginx.ingress.kubernetes.io/canary-by-header-value: "{{ .Values.ingress.blueGreen.canaryHeaderValue }}"
-    {{- end }}
-spec:
-  ingressClassName: nginx
-  {{- if .Values.ingress.tls }}
-  tls:
-    {{- toYaml .Values.ingress.tls | nindent 4 }}
-  {{- end }}
-  rules:
-    {{- range .Values.ingress.hosts }}
-    - host: {{ .host }}
-      http:
-        paths:
-          - path: /({{ $.Values.ingress.pathPrefix }}/|$)(.*)
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: {{ $fullName }}
-                # Point to the opposite namespace for canary traffic
-                namespace: {{ $.Values.global.environment }}-{{ $.Values.global.applicationName }}-{{ if eq $deploymentSlot "blue" }}green{{ else }}blue{{ end }}
-                port:
-                  number: {{ $svcPort }}
-    {{- end }}
-{{- end }}
+
 {{- end }}
