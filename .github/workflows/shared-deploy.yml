@@ -559,37 +559,10 @@ jobs:
 
     environment: 
       name: ${{ needs.validate-environment.outputs.target_environment }}
-      url: ${{ needs.validate-environment.outputs.target_environment == 'prod' && 'https://your-prod-app-url.com' || format('https://your-{0}-app-url.com', needs.validate-environment.outputs.target_environment) }}
+      url: 'https://your-prod-app-url.com'
     steps:
-      - name: Clean workspace
-        uses: ./.github/actions/workspace-cleanup
-        with:
-          cleanup_docker: 'false'
-          cleanup_temp: 'true'
-
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: 🚨 DEBUG - Check received outputs
-        run: |
-          echo "🔍 What deploy job received from validate-environment:"
-          echo "should_deploy: '${{ needs.validate-environment.outputs.should_deploy }}'"
-          echo "target_environment: '${{ needs.validate-environment.outputs.target_environment }}'"
-          echo "aks_cluster_name: '${{ needs.validate-environment.outputs.aks_cluster_name_1 }}'"
-          echo "aks_resource_group: '${{ needs.validate-environment.outputs.aks_resource_group_1 }}'"
-          echo ""
-          echo "🔍 Checking if values are null or empty:"
-          if [ -z "${{ needs.validate-environment.outputs.aks_cluster_name_1 }}" ]; then
-            echo "❌ aks_cluster_name is NULL/EMPTY in deploy job"
-          else
-            echo "✅ aks_cluster_name received: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
-          fi
-          
-          if [ -z "${{ needs.validate-environment.outputs.aks_resource_group_1 }}" ]; then
-            echo "❌ aks_resource_group is NULL/EMPTY in deploy job"
-          else
-            echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group_1 }}'"
-          fi
 
       - name: Deploy to AKS with Blue-Green Strategy
         uses: ./.github/actions/helm-deploy
@@ -607,22 +580,24 @@ jobs:
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
-          # Blue-Green deployment parameters (only for prod)
-          blue_green_enabled: ${{ needs.validate-environment.outputs.target_environment == 'prod' && env.BLUE_GREEN_ENABLED || 'false' }}
-          current_slot: ${{ needs.blue-green-strategy.outputs.current_slot || 'blue' }}
-          target_slot: ${{ needs.blue-green-strategy.outputs.target_slot || 'green' }}
-          deployment_strategy: ${{ needs.blue-green-strategy.outputs.deployment_strategy || 'rolling' }}
+          # Blue-Green deployment parameters for production
+          blue_green_enabled: ${{ env.BLUE_GREEN_ENABLED }}
+          current_slot: ${{ needs.blue-green-strategy.outputs.current_slot }}
+          target_slot: ${{ needs.blue-green-strategy.outputs.target_slot }}
+          deployment_strategy: ${{ needs.blue-green-strategy.outputs.deployment_strategy }}
           canary_steps: ${{ env.CANARY_STEPS }}
           health_check_duration: ${{ env.HEALTH_CHECK_DURATION }}
 
   create_release:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, deploy]
+    needs: [validate-environment, setup, deploy-non-prod, deploy-prod]
     if: |
+      always() &&
       needs.validate-environment.outputs.should_deploy == 'true' && 
       needs.setup.outputs.should_deploy == 'true' && 
       needs.validate-environment.outputs.target_environment == 'prod' && 
       startsWith(github.ref, 'refs/tags/') &&
+      (needs.deploy-prod.result == 'success' || needs.deploy-prod.result == 'skipped') &&
       !failure() && !cancelled()
     steps:
       # - name: Clean workspace
