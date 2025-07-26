@@ -131,8 +131,6 @@ jobs:
             "dev")
               if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-dev-cluster"
-                AKS_RG="rg-aks-dev"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ Dev deployment approved: manual trigger with branch validation override"
                 else
@@ -140,8 +138,6 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-dev-cluster"
-                AKS_RG="rg-aks-dev"
                 echo "✅ Dev deployment approved: manual override from branch $GITHUB_REF"
               else
                 echo "❌ Dev deployment blocked: must be dev/develop branch or use manual override"
@@ -150,8 +146,6 @@ jobs:
             "sqe")
               if [[ "$GITHUB_REF" == "refs/heads/sqe" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-sqe-cluster"
-                AKS_RG="rg-aks-sqe"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ SQE deployment approved: manual trigger with branch validation override"
                 else
@@ -159,8 +153,6 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-sqe-cluster"
-                AKS_RG="rg-aks-sqe"
                 echo "✅ SQE deployment approved: manual override from branch $GITHUB_REF"
               else
                 echo "❌ SQE deployment blocked: must be sqe branch or use manual override"
@@ -169,8 +161,6 @@ jobs:
             "ppr")
               if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-preprod-cluster"
-                AKS_RG="rg-aks-preprod"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ Pre-Prod deployment approved: manual trigger with branch validation override"
                 else
@@ -178,8 +168,6 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-preprod-cluster"
-                AKS_RG="rg-aks-preprod"
                 echo "✅ Pre-Prod deployment approved: manual override from branch $GITHUB_REF"
               else
                 echo "❌ Pre-Prod deployment blocked: must be release branch or use manual override"
@@ -188,8 +176,6 @@ jobs:
             "prod")
               if [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-prod-cluster"
-                AKS_RG="rg-aks-prod"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ Production deployment approved: manual trigger with branch validation override"
                   if [[ -n "$DEPLOY_NOTES" ]]; then
@@ -200,8 +186,6 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="aks-prod-cluster"
-                AKS_RG="rg-aks-prod"
                 echo "✅ Production deployment approved: manual override from branch $GITHUB_REF"
                 if [[ -n "$DEPLOY_NOTES" ]]; then
                   echo "   📝 Deployment Notes: $DEPLOY_NOTES"
@@ -215,12 +199,96 @@ jobs:
               ;;
           esac
           
-          # Debug output
-          echo "📊 Environment validation results:"
-          echo "   - Should deploy: $SHOULD_DEPLOY"
-          echo "   - Target environment: $TARGET_ENV"
-          echo "   - AKS cluster name: $AKS_CLUSTER"
-          echo "   - AKS resource group: $AKS_RG"
+          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+          echo "target_environment=$TARGET_ENV" >> $GITHUB_OUTPUT
+
+    - name: Configure AKS Cluster Settings
+      id: aks-config
+      if: steps.check.outputs.should_deploy == 'true'
+      environment: ${{ steps.check.outputs.target_environment }}
+      run: |
+        TARGET_ENV="${{ steps.check.outputs.target_environment }}"
+        echo "🔧 Configuring AKS cluster settings for environment: $TARGET_ENV"
+        
+        # Load AKS configuration from environment variables
+        # These variables should be set in GitHub Environment settings for each environment
+        AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME }}"
+        AKS_RG="${{ vars.AKS_RESOURCE_GROUP }}"
+        REGION="${{ vars.AKS_REGION }}"
+        
+        echo "📋 Environment Variables Loaded:"
+        echo "   AKS_CLUSTER_NAME: ${AKS_CLUSTER:-'NOT_SET'}"
+        echo "   AKS_RESOURCE_GROUP: ${AKS_RG:-'NOT_SET'}"
+        echo "   AKS_REGION: ${REGION:-'NOT_SET'}"
+        
+        # Fallback to naming convention if environment variables are not set
+        if [ -z "$AKS_CLUSTER" ]; then
+          echo "⚠️ AKS_CLUSTER_NAME environment variable not set, using naming convention"
+          case "$TARGET_ENV" in
+            "dev") AKS_CLUSTER="aks-dev-cluster" ;;
+            "sqe") AKS_CLUSTER="aks-sqe-cluster" ;;
+            "ppr") AKS_CLUSTER="aks-preprod-cluster" ;;
+            "prod") AKS_CLUSTER="aks-prod-cluster" ;;
+            *) 
+              echo "❌ Unknown environment: $TARGET_ENV"
+              exit 1
+              ;;
+          esac
+        fi
+        
+        if [ -z "$AKS_RG" ]; then
+          echo "⚠️ AKS_RESOURCE_GROUP environment variable not set, using naming convention"
+          case "$TARGET_ENV" in
+            "dev") AKS_RG="rg-aks-dev" ;;
+            "sqe") AKS_RG="rg-aks-sqe" ;;
+            "ppr") AKS_RG="rg-aks-preprod" ;;
+            "prod") AKS_RG="rg-aks-prod" ;;
+            *) 
+              echo "❌ Unknown environment: $TARGET_ENV"
+              exit 1
+              ;;
+          esac
+        fi
+        
+        if [ -z "$REGION" ]; then
+          echo "⚠️ AKS_REGION environment variable not set, using default"
+          case "$TARGET_ENV" in
+            "dev"|"sqe") REGION="eastus" ;;
+            "ppr"|"prod") REGION="westus2" ;;
+            *) REGION="eastus" ;;
+          esac
+        fi
+        
+        # Validate final configuration
+        if [ -z "$AKS_CLUSTER" ]; then
+          echo "❌ AKS cluster name could not be determined for environment: $TARGET_ENV"
+          exit 1
+        fi
+        
+        if [ -z "$AKS_RG" ]; then
+          echo "❌ AKS resource group could not be determined for environment: $TARGET_ENV"
+          exit 1
+        fi
+        
+        echo "✅ Final AKS Configuration:"
+        echo "   Environment: $TARGET_ENV"
+        echo "   Cluster Name: $AKS_CLUSTER"
+        echo "   Resource Group: $AKS_RG"
+        echo "   Region: $REGION"
+        echo "   Configuration Source: ${AKS_CLUSTER:+Environment Variables}" "${AKS_CLUSTER:-Naming Convention}"
+        
+        # Set outputs for use in subsequent jobs
+        echo "aks_cluster_name=$AKS_CLUSTER" >> $GITHUB_OUTPUT
+        echo "aks_resource_group=$AKS_RG" >> $GITHUB_OUTPUT
+        echo "region=$REGION" >> $GITHUB_OUTPUT
+        
+        # Debug output
+        echo "📊 Environment validation results:"
+        echo "   - Should deploy: ${{ steps.check.outputs.should_deploy }}"
+        echo "   - Target environment: $TARGET_ENV"
+        echo "   - AKS cluster name: $AKS_CLUSTER"
+        echo "   - AKS resource group: $AKS_RG"
+        echo "   - Region: $REGION"
           
           # Validate that AKS cluster configuration is properly set
           if [ "$TARGET_ENV" != "unknown" ] && [ "$TARGET_ENV" != "" ]; then
