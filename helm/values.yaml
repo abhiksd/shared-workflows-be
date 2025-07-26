@@ -5,7 +5,7 @@
 # Global configuration
 global:
   environment: dev
-  applicationName: java-backend1
+  applicationName: my-app
   applicationType: java-springboot
 
 # Replica count
@@ -13,7 +13,7 @@ replicaCount: 1
 
 # Image configuration
 image:
-  repository: myregistry.azurecr.io/java-backend1
+  repository: myregistry.azurecr.io/my-app
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -49,18 +49,20 @@ securityContext:
 # Service configuration
 service:
   type: ClusterIP
-  port: 8080
+  port: 8280
+  targetPort: 8280
   annotations: {}
 
 # Ingress configuration
 ingress:
   enabled: true
-  pathPrefix: "backend1"
+  pathPrefix: "my-app"
   proxyBodySize: "1024m"
   hosts:
     - host: dev.mydomain.com
-    - host: staging.mydomain.com
-    - host: production.mydomain.com
+    - host: sqe.mydomain.com
+    - host: preprod.mydomain.com
+    - host: api.mydomain.com
 
 # Resource limits and requests
 resources:
@@ -93,13 +95,32 @@ env:
   - name: ENVIRONMENT
     value: "dev"
   - name: APPLICATION_NAME
-    value: "java-backend1"
+    value: "my-app"
   - name: SERVER_PORT
-    value: "8080"
+    value: "8280"
+  - name: SPRING_PROFILES_ACTIVE
+    value: "dev,common,actuator"
   - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
-    value: "health,info,metrics,prometheus,env,configprops,beans,mappings"
+    value: "health,info,metrics,prometheus"
   - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
-    value: "always"
+    value: "when-authorized"
+  # Azure Key Vault Integration
+  - name: AZURE_KEYVAULT_ENABLED
+    value: "false"
+  - name: AZURE_KEYVAULT_URI
+    value: ""
+  - name: AZURE_TENANT_ID
+    valueFrom:
+      secretKeyRef:
+        name: azure-secrets
+        key: tenant-id
+        optional: true
+  - name: AZURE_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: azure-secrets
+        key: client-id
+        optional: true
 
 # ConfigMap configuration
 configMap:
@@ -114,8 +135,8 @@ configMap:
 livenessProbe:
   enabled: true
   httpGet:
-    path: /actuator/health
-    port: 8080
+    path: /my-app/actuator/health/liveness
+    port: 8280
   initialDelaySeconds: 60
   periodSeconds: 10
   timeoutSeconds: 5
@@ -125,8 +146,8 @@ livenessProbe:
 readinessProbe:
   enabled: true
   httpGet:
-    path: /actuator/health/readiness
-    port: 8080
+    path: /my-app/actuator/health/readiness
+    port: 8280
   initialDelaySeconds: 30
   periodSeconds: 5
   timeoutSeconds: 3
@@ -152,8 +173,8 @@ monitoring:
   enabled: false
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/port: "8080"
-    prometheus.io/path: "/actuator/prometheus"
+    prometheus.io/port: "8280"
+    prometheus.io/path: "/my-app/actuator/prometheus"
 
 # Tests
 tests:
@@ -162,27 +183,51 @@ tests:
 # Azure Key Vault integration
 azureKeyVault:
   enabled: false
-  keyvaultName: ""
+  keyvaultName: "kv-my-app-dev"
   tenantId: ""
   userAssignedIdentityID: ""
   mountPath: "/mnt/secrets-store"
   secrets:
-    - objectName: "db-password"
-      objectAlias: "db-password"
-    - objectName: "api-key"
-      objectAlias: "api-key"
+    - objectName: "mongodb-connection-string"
+      objectAlias: "mongodb-connection-string"
+    - objectName: "mongodb-health-connection-string"
+      objectAlias: "mongodb-health-connection-string"
     - objectName: "jwt-secret"
       objectAlias: "jwt-secret"
+    - objectName: "memcached-addresses"
+      objectAlias: "memcached-addresses"
+    - objectName: "redis-password"
+      objectAlias: "redis-password"
+    - objectName: "application-insights-key"
+      objectAlias: "application-insights-key"
+    - objectName: "oauth2-client-id"
+      objectAlias: "oauth2-client-id"
+    - objectName: "oauth2-client-secret"
+      objectAlias: "oauth2-client-secret"
+    - objectName: "cors-allowed-origins"
+      objectAlias: "cors-allowed-origins"
   secretObjects:
     - secretName: "app-secrets"
       type: "Opaque"
       data:
-        - objectName: "db-password"
-          key: "db-password"
-        - objectName: "api-key"  
-          key: "api-key"
+        - objectName: "mongodb-connection-string"
+          key: "mongodb-connection-string"
+        - objectName: "mongodb-health-connection-string"
+          key: "mongodb-health-connection-string"
         - objectName: "jwt-secret"
           key: "jwt-secret"
+        - objectName: "memcached-addresses"
+          key: "memcached-addresses"
+        - objectName: "redis-password"
+          key: "redis-password"
+        - objectName: "application-insights-key"
+          key: "application-insights-key"
+        - objectName: "oauth2-client-id"
+          key: "oauth2-client-id"
+        - objectName: "oauth2-client-secret"
+          key: "oauth2-client-secret"
+        - objectName: "cors-allowed-origins"
+          key: "cors-allowed-origins"
 
 # Monitoring configuration
 monitoring:

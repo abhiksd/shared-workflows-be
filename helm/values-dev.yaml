@@ -1,21 +1,26 @@
-# Development environment values for java-backend1
+# Development environment values for my-app
 global:
   environment: dev
-  applicationName: java-backend1
+  applicationName: my-app
   applicationType: java-springboot
 
 replicaCount: 1
 
 image:
-  repository: myregistry.azurecr.io/java-backend1
+  repository: myregistry.azurecr.io/my-app
   tag: "dev-latest"
 
 ingress:
   enabled: true
-  pathPrefix: "backend1"
+  pathPrefix: "my-app"
   proxyBodySize: "1024m"
   hosts:
     - host: dev.mydomain.com
+
+# Azure Key Vault (Development - disabled)
+azureKeyVault:
+  enabled: false
+  keyvaultName: "kv-my-app-dev"
 
 resources:
   limits:
@@ -29,13 +34,16 @@ env:
   - name: ENVIRONMENT
     value: "dev"
   - name: APPLICATION_NAME
-    value: "java-backend1"
+    value: "my-app"
   - name: SERVER_PORT
-    value: "8080"
+    value: "8280"
   - name: SPRING_PROFILES_ACTIVE
-    value: "dev"
+    value: "dev,common,actuator"
   - name: LOG_LEVEL
     value: "DEBUG"
+  # Azure Key Vault Integration (Development - disabled)
+  - name: AZURE_KEYVAULT_ENABLED
+    value: "false"
 
 autoscaling:
   enabled: false

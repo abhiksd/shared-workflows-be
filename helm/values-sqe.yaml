@@ -1,7 +1,7 @@
-# SQE environment values for java-backend1
+# SQE environment values for my-app
 global:
   environment: sqe
-  applicationName: java-backend1
+  applicationName: my-app
   applicationType: java-springboot
 
 replicaCount: 2

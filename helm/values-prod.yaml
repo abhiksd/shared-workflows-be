@@ -1,24 +1,31 @@
-# Production environment values for java-backend1
+# Production environment values for my-app
 global:
   environment: prod
   # Blue-Green deployment support
   blueGreenEnabled: true
   deploymentSlot: "{{ .Values.global.deploymentSlot | default \"blue\" }}"
-  applicationName: java-backend1
+  applicationName: my-app
   applicationType: java-springboot
 
 replicaCount: 3
 
 image:
-  repository: myregistry.azurecr.io/java-backend1
+  repository: myregistry.azurecr.io/my-app
   tag: "prod-latest"
 
 ingress:
   enabled: true
-  pathPrefix: "backend1"
+  pathPrefix: "my-app"
   proxyBodySize: "1024m"
   hosts:
     - host: api.mydomain.com
+
+# Azure Key Vault (Production)
+azureKeyVault:
+  enabled: true
+  keyvaultName: "kv-my-app-prod"
+  tenantId: "${AZURE_TENANT_ID}"
+  userAssignedIdentityID: "${AZURE_CLIENT_ID}"
 
 
 resources:
@@ -33,15 +40,30 @@ env:
   - name: ENVIRONMENT
     value: "prod"
   - name: APPLICATION_NAME
-    value: "java-backend1"
+    value: "my-app"
   - name: SERVER_PORT
-    value: "8080"
+    value: "8280"
   - name: SPRING_PROFILES_ACTIVE
-    value: "prod"
+    value: "prod,common,actuator"
   - name: LOG_LEVEL
     value: "WARN"
   - name: DEPLOYMENT_SLOT
     value: "{{ .Values.global.deploymentSlot | default \"blue\" }}"
+  # Azure Key Vault Integration (Production)
+  - name: AZURE_KEYVAULT_ENABLED
+    value: "true"
+  - name: AZURE_KEYVAULT_URI
+    value: "https://kv-my-app-prod.vault.azure.net/"
+  - name: AZURE_TENANT_ID
+    valueFrom:
+      secretKeyRef:
+        name: azure-secrets
+        key: tenant-id
+  - name: AZURE_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: azure-secrets
+        key: client-id
 
 autoscaling:
   enabled: true
