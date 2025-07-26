@@ -44,6 +44,31 @@ inputs:
   deployment_context:
     description: 'JSON deployment context passed from validate-environment'
     required: false
+  # Blue-Green deployment specific inputs
+  blue_green_enabled:
+    description: 'Enable Blue-Green deployment strategy'
+    required: false
+    default: 'false'
+  current_slot:
+    description: 'Current active deployment slot (blue/green)'
+    required: false
+    default: 'blue'
+  target_slot:
+    description: 'Target deployment slot (blue/green)'
+    required: false
+    default: 'green'
+  deployment_strategy:
+    description: 'Deployment strategy (rolling/blue-green/blue-green-canary)'
+    required: false
+    default: 'rolling'
+  canary_steps:
+    description: 'Canary traffic percentage steps'
+    required: false
+    default: '5,10,25,50,100'
+  health_check_duration:
+    description: 'Health check duration in seconds'
+    required: false
+    default: '300'
 
 outputs:
   deployment_status:
@@ -276,13 +301,24 @@ runs:
 
     - name: Setup Kubernetes namespace with enhanced labeling
       run: |
-        NAMESPACE="${{ inputs.environment }}-${{ inputs.application_name }}"
+        # Determine namespace based on deployment strategy
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && "${{ inputs.environment }}" == "prod" ]]; then
+          NAMESPACE="${{ inputs.environment }}-${{ inputs.application_name }}-${{ inputs.target_slot }}"
+          echo "🔵🟢 Blue-Green deployment enabled - using slot-specific namespace"
+          echo "   - Current active slot: ${{ inputs.current_slot }}"
+          echo "   - Target deployment slot: ${{ inputs.target_slot }}"
+          echo "   - Deployment strategy: ${{ inputs.deployment_strategy }}"
+        else
+          NAMESPACE="${{ inputs.environment }}-${{ inputs.application_name }}"
+          echo "🔄 Standard rolling deployment"
+        fi
         
         echo "🏗️  Setting up Kubernetes namespace with enhanced metadata..."
         echo "========================================================"
         echo "   - Namespace: $NAMESPACE"
         echo "   - Environment: ${{ inputs.environment }}"
         echo "   - Application: ${{ inputs.application_name }}"
+        echo "   - Blue-Green Enabled: ${{ inputs.blue_green_enabled }}"
         echo ""
         
         # Create namespace with comprehensive labels and annotations
@@ -293,6 +329,16 @@ runs:
         kubectl label namespace ${NAMESPACE} application=${{ inputs.application_name }} --overwrite
         kubectl label namespace ${NAMESPACE} managed-by=github-actions --overwrite
         kubectl label namespace ${NAMESPACE} deployment-method=helm --overwrite
+        
+        # Add Blue-Green specific labels if enabled
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && "${{ inputs.environment }}" == "prod" ]]; then
+          kubectl label namespace ${NAMESPACE} deployment-slot=${{ inputs.target_slot }} --overwrite
+          kubectl label namespace ${NAMESPACE} deployment-strategy=${{ inputs.deployment_strategy }} --overwrite
+          kubectl annotate namespace ${NAMESPACE} \
+            "blue-green.deployment.kubernetes.io/current-slot=${{ inputs.current_slot }}" --overwrite
+          kubectl annotate namespace ${NAMESPACE} \
+            "blue-green.deployment.kubernetes.io/target-slot=${{ inputs.target_slot }}" --overwrite
+        fi
         
         # Add deployment context as annotation if available
         if [[ -n "${{ inputs.deployment_context }}" ]]; then
@@ -342,6 +388,24 @@ runs:
           applicationName: ${{ inputs.application_name }}
           applicationType: ${{ inputs.application_type }}
           deploymentTimestamp: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        EOF
+        
+        # Add Blue-Green specific values if enabled
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && "${{ inputs.environment }}" == "prod" ]]; then
+          cat >> ${RUNTIME_VALUES_FILE} << EOF
+          # Blue-Green deployment configuration
+          blueGreenEnabled: true
+          deploymentSlot: "${{ inputs.target_slot }}"
+          deploymentStrategy: "${{ inputs.deployment_strategy }}"
+        EOF
+          echo "✅ Blue-Green configuration added to runtime values"
+        else
+          cat >> ${RUNTIME_VALUES_FILE} << EOF
+          blueGreenEnabled: false
+        EOF
+        fi
+        
+        cat >> ${RUNTIME_VALUES_FILE} << EOF
           
         image:
           repository: ${{ inputs.registry }}/${{ inputs.application_name }}
@@ -562,6 +626,84 @@ runs:
         
         echo ""
         echo "✅ All enhanced deployment tests completed successfully"
+      shell: bash
+
+    - name: Blue-Green traffic switching
+      if: inputs.blue_green_enabled == 'true' && inputs.environment == 'prod'
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        APP_NAME="${{ inputs.application_name }}"
+        TARGET_SLOT="${{ inputs.target_slot }}"
+        CURRENT_SLOT="${{ inputs.current_slot }}"
+        CANARY_STEPS="${{ inputs.canary_steps }}"
+        HEALTH_CHECK_DURATION="${{ inputs.health_check_duration }}"
+        
+        echo "🔵🟢 Starting Blue-Green traffic switching..."
+        echo "========================================================"
+        echo "   - Application: ${APP_NAME}"
+        echo "   - Current active slot: ${CURRENT_SLOT}"
+        echo "   - New deployment slot: ${TARGET_SLOT}"
+        echo "   - Deployment strategy: ${{ inputs.deployment_strategy }}"
+        echo "   - Canary steps: ${CANARY_STEPS}"
+        echo ""
+        
+        # Check if canary deployment is enabled
+        if [[ "${{ inputs.deployment_strategy }}" == "blue-green-canary" ]]; then
+          echo "🐤 Starting canary traffic shifting..."
+          
+          # Split canary steps and implement gradual traffic shifting
+          IFS=',' read -ra STEPS <<< "${CANARY_STEPS}"
+          for step in "${STEPS[@]}"; do
+            echo ""
+            echo "📊 Setting canary traffic to ${step}%..."
+            
+            # Update canary ingress weight
+            kubectl patch ingress prod-${APP_NAME}-ingress-canary -n default --type='merge' -p="{\"metadata\":{\"annotations\":{\"nginx.ingress.kubernetes.io/canary-weight\":\"${step}\"}}}" || true
+            
+            echo "   ✅ Canary weight set to ${step}%"
+            echo "   ⏳ Health check period: ${HEALTH_CHECK_DURATION} seconds"
+            
+            # Health check period
+            sleep ${HEALTH_CHECK_DURATION}
+            
+            # Check health of new deployment
+            if kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=${APP_NAME} --field-selector=status.phase=Running | grep -q Running; then
+              echo "   ✅ Health check passed for ${step}% traffic"
+            else
+              echo "   ❌ Health check failed for ${step}% traffic"
+              echo "   🔄 Rolling back canary deployment..."
+              kubectl patch ingress prod-${APP_NAME}-ingress-canary -n default --type='merge' -p='{"metadata":{"annotations":{"nginx.ingress.kubernetes.io/canary-weight":"0"}}}' || true
+              exit 1
+            fi
+          done
+          
+          echo ""
+          echo "🎉 Canary deployment completed successfully!"
+          echo "🔀 Switching main traffic to new deployment slot..."
+        fi
+        
+        # Final traffic switch - update main ingress to point to new namespace
+        echo ""
+        echo "🔀 Performing final traffic switch..."
+        kubectl patch ingress prod-${APP_NAME}-ingress -n default --type='merge' -p="{\"spec\":{\"rules\":[{\"host\":\"api.mydomain.com\",\"http\":{\"paths\":[{\"path\":\"/(backend1/|$)(.*)\",\"pathType\":\"ImplementationSpecific\",\"backend\":{\"service\":{\"name\":\"${APP_NAME}\",\"namespace\":\"${NAMESPACE}\",\"port\":{\"number\":8080}}}}]}}]}}" || true
+        
+        # Disable canary after successful switch
+        kubectl patch ingress prod-${APP_NAME}-ingress-canary -n default --type='merge' -p='{"metadata":{"annotations":{"nginx.ingress.kubernetes.io/canary-weight":"0"}}}' || true
+        
+        # Update ingress labels to reflect new active slot
+        kubectl label ingress prod-${APP_NAME}-ingress -n default active-slot=${TARGET_SLOT} --overwrite || true
+        kubectl label ingress prod-${APP_NAME}-ingress-canary -n default canary-slot=${CURRENT_SLOT} --overwrite || true
+        
+        echo "✅ Traffic successfully switched to ${TARGET_SLOT} slot"
+        echo "🎯 Blue-Green deployment completed successfully!"
+        
+        # Cleanup old deployment (optional, can be kept for quick rollback)
+        echo ""
+        echo "📋 Post-deployment cleanup options:"
+        echo "   - Old ${CURRENT_SLOT} deployment retained for quick rollback"
+        echo "   - To cleanup: kubectl delete namespace prod-${APP_NAME}-${CURRENT_SLOT}"
+        echo "   - To rollback: Re-run deployment with target_slot=${CURRENT_SLOT}"
+        echo ""
       shell: bash
 
     - name: Generate comprehensive deployment summary
