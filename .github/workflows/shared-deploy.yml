@@ -58,6 +58,11 @@ on:
         required: false
         type: string
         default: ''
+      emergency_deployment:
+        description: 'Emergency deployment (requires additional validation for PROD/PPR)'
+        required: false
+        type: boolean
+        default: false
     secrets: inherit
 
 env:
@@ -128,6 +133,52 @@ jobs:
           # Validate deployment rules based on target environment
           # Check if branch validation should be overridden
           OVERRIDE_VALIDATION="${{ inputs.override_branch_validation }}"
+          EMERGENCY_DEPLOYMENT="${{ inputs.emergency_deployment }}"
+          ACTOR="${{ github.actor }}"
+          
+          # Define authorized users for PPR and PROD deployments
+          AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
+          
+          # Function to check if user is authorized for protected environments
+          is_authorized_user() {
+            local user="$1"
+            if [[ ",$AUTHORIZED_USERS," == *",$user,"* ]]; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
+          # Function to validate protected environment deployment
+          validate_protected_deployment() {
+            local env="$1"
+            local requires_emergency="$2"
+            
+            echo "🔒 Validating protected environment deployment: $env"
+            
+            # Check if it's a manual deployment attempting override
+            if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
+              
+              # Check if user is authorized
+              if ! is_authorized_user "$ACTOR"; then
+                echo "❌ User '$ACTOR' is not authorized for $env deployments"
+                echo "   Authorized users: $AUTHORIZED_USERS"
+                return 1
+              fi
+              
+              # For emergency deployments, require emergency flag
+              if [[ "$requires_emergency" == "true" && "$EMERGENCY_DEPLOYMENT" != "true" ]]; then
+                echo "❌ Emergency deployment flag required for $env manual override"
+                echo "   Please set emergency_deployment=true for manual $env deployments"
+                return 1
+              fi
+              
+              echo "✅ Protected deployment authorized for user '$ACTOR'"
+              return 0
+            fi
+            
+            return 0
+          }
           
           case "$TARGET_ENV" in
             "dev")
@@ -169,41 +220,51 @@ jobs:
               fi
               ;;
             "ppr")
-              if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              # Validate protection for PPR environment
+              if ! validate_protected_deployment "PPR" "false"; then
+                SHOULD_DEPLOY="false"
+                echo "❌ PPR deployment blocked: protection validation failed"
+              elif [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PPR }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_PPR }}"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Pre-Prod deployment approved: manual trigger with branch validation override"
+                  echo "✅ Pre-Prod deployment approved: manual trigger with authorized override"
                 else
-                  echo "✅ Pre-Prod deployment approved: release branch or manual trigger"
+                  echo "✅ Pre-Prod deployment approved: release branch or authorized manual trigger"
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PPR }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_PPR }}"
-                echo "✅ Pre-Prod deployment approved: manual override from branch $GITHUB_REF"
+                echo "✅ Pre-Prod deployment approved: authorized manual override from branch $GITHUB_REF"
               else
-                echo "❌ Pre-Prod deployment blocked: must be release branch or use manual override"
+                echo "❌ Pre-Prod deployment blocked: must be release branch or authorized manual override"
               fi
               ;;
             "prod")
-              if [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              # Validate protection for PROD environment (strongest protection)
+              if ! validate_protected_deployment "PROD" "true"; then
+                SHOULD_DEPLOY="false"
+                echo "❌ PROD deployment blocked: protection validation failed"
+              elif [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PROD }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_PROD }}"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Production deployment approved: manual trigger with branch validation override"
+                  echo "✅ Production deployment approved: EMERGENCY manual trigger with authorized override"
+                  echo "   🚨 EMERGENCY DEPLOYMENT: User=$ACTOR, Notes='$DEPLOY_NOTES'"
                 else
-                  echo "✅ Production deployment approved: tag or manual trigger"
+                  echo "✅ Production deployment approved: tag or authorized manual trigger"
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PROD }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_PROD }}"
-                echo "✅ Production deployment approved: manual override from branch $GITHUB_REF"
+                echo "✅ Production deployment approved: EMERGENCY authorized manual override from branch $GITHUB_REF"
+                echo "   🚨 EMERGENCY DEPLOYMENT: User=$ACTOR, Notes='$DEPLOY_NOTES'"
               else
-                echo "❌ Production deployment blocked: must be tag or use manual override"
+                echo "❌ Production deployment blocked: must be tag or authorized emergency manual override"
               fi
               ;;
             *)
