@@ -98,12 +98,21 @@ spec:
                   name: {{ include "java-backend1.fullname" . }}-config
                   key: DEBUG
             {{- end }}
-            # Azure Key Vault Secrets Path
-            {{- if .Values.azureKeyVault.enabled }}
-            - name: AZURE_KEYVAULT_SECRETS_PATH
-              value: {{ .Values.azureKeyVault.mountPath | default "/mnt/secrets-store" }}
-            - name: SPRING_CLOUD_AZURE_KEYVAULT_SECRET_ENABLED
-              value: "true"
+            # Spring Boot Profile Configuration
+            {{- if .Values.springBootProfile.enabled }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.springBootProfile.activeProfile | default .Values.global.environment }}
+            - name: SPRING_CONFIG_LOCATION
+              value: {{ .Values.springBootProfile.configLocation | default "classpath:application.yml" }}
+            - name: CONFIG_MANAGEMENT_TYPE
+              value: "spring-boot-profiles"
+            {{- end }}
+            # Kubernetes Secrets Path (replaces Azure Key Vault)
+            {{- if .Values.kubernetesSecrets.enabled }}
+            - name: KUBERNETES_SECRETS_PATH
+              value: "/etc/secrets"
+            - name: SECRET_MANAGEMENT_TYPE
+              value: "kubernetes-native"
             {{- end }}
             # Additional Environment Variables
             {{- range .Values.env }}
@@ -113,6 +122,16 @@ spec:
             {{- if .Values.configMap.enabled }}
             - name: CONFIG_MAP_NAME
               value: {{ include "java-backend1.fullname" . }}-config
+            {{- end }}
+            # Environment variables from Kubernetes Secret
+            {{- if .Values.kubernetesSecrets.enabled }}
+            {{- range .Values.kubernetesSecrets.secrets }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.kubernetesSecrets.secretName | default "app-secrets" }}
+                  key: {{ .key }}
+            {{- end }}
             {{- end }}
           {{- if .Values.livenessProbe.enabled }}
           livenessProbe:
@@ -137,9 +156,9 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
-            {{- if .Values.azureKeyVault.enabled }}
-            - name: secrets-store
-              mountPath: {{ .Values.azureKeyVault.mountPath | default "/mnt/secrets-store" }}
+            {{- if .Values.kubernetesSecrets.enabled }}
+            - name: secrets-volume
+              mountPath: /etc/secrets
               readOnly: true
             {{- end }}
             {{- if .Values.configMap.enabled }}
@@ -151,13 +170,11 @@ spec:
             {{- toYaml .Values.volumeMounts | nindent 12 }}
             {{- end }}
       volumes:
-        {{- if .Values.azureKeyVault.enabled }}
-        - name: secrets-store
-          csi:
-            driver: secrets-store.csi.k8s.io
-            readOnly: true
-            volumeAttributes:
-              secretProviderClass: {{ include "java-backend1.fullname" . }}-keyvault
+        {{- if .Values.kubernetesSecrets.enabled }}
+        - name: secrets-volume
+          secret:
+            secretName: {{ .Values.kubernetesSecrets.secretName | default "app-secrets" }}
+            defaultMode: 0644
         {{- end }}
         {{- if .Values.configMap.enabled }}
         - name: config-volume

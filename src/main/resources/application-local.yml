@@ -1,29 +1,30 @@
 # Local Development Profile
-# Use H2 in-memory database for local development
+# Optimized for local development with minimal external dependencies
 spring:
   profiles:
     active: local
   
-  # H2 Database Configuration
+  # H2 In-Memory Database for local development
   datasource:
-    url: jdbc:h2:mem:testdb
-    driverClassName: org.h2.Driver
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     username: sa
-    password: password
+    password: 
+    driver-class-name: org.h2.Driver
     hikari:
       maximum-pool-size: 5
       minimum-idle: 1
-      connection-timeout: 20000
+      connection-timeout: 30000
   
-  # H2 Console (for development)
+  # H2 Console Configuration
   h2:
     console:
       enabled: true
       path: /h2-console
       settings:
+        trace: false
         web-allow-others: false
   
-  # JPA Configuration
+  # JPA Configuration for H2
   jpa:
     database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
@@ -33,50 +34,25 @@ spring:
       hibernate:
         format_sql: true
         use_sql_comments: true
+        jdbc:
+          time_zone: UTC
   
-  # Security Configuration (Minimal for local dev)
-  security:
-    oauth2:
-      client:
-        registration:
-          azure:
-            client-id: local-client-id
-            client-secret: local-client-secret
-            scope: openid,profile,email
-            redirect-uri: http://localhost:8080/login/oauth2/code/azure
-        provider:
-          azure:
-            authorization-uri: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-            token-uri: https://login.microsoftonline.com/common/oauth2/v2.0/token
-            user-info-uri: https://graph.microsoft.com/v1.0/me
-            user-name-attribute: name
-  
-  # Redis Configuration (Disabled for local)
-  redis:
-    host: localhost
-    port: 6379
-    password: 
-    timeout: 2000ms
-    lettuce:
-      pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 0
+  # Cache Configuration - Simple in-memory caching
   cache:
-    type: simple  # Use simple cache instead of Redis for local
-  
-  # Development Tools
-  devtools:
-    restart:
-      enabled: true
-    livereload:
-      enabled: true
+    type: simple
+    cache-names: default,users,sessions
+    simple:
+      spec: maximumSize=500,expireAfterWrite=300s
 
 # Server Configuration
 server:
   port: 8080
   servlet:
     context-path: /api
+  error:
+    include-stacktrace: always
+    include-message: always
+    include-binding-errors: always
 
 # Logging Configuration
 logging:
@@ -84,36 +60,93 @@ logging:
     com.example.javaapp: DEBUG
     org.springframework.web: DEBUG
     org.springframework.security: DEBUG
+    org.springframework.cache: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.boot.actuator: DEBUG
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
-# Management & Actuator
+# Management & Actuator - Full exposure for development
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,env,beans,configprops
+        include: "*"
+      base-path: /actuator
   endpoint:
     health:
       show-details: always
+      show-components: always
+    shutdown:
+      enabled: true
   metrics:
     export:
       prometheus:
         enabled: true
+    tags:
+      application: java-app
+      environment: local
 
 # Application Configuration
 app:
   name: Java App
-  version: 1.0.0
+  version: ${APP_VERSION:1.0.0-LOCAL}
   environment: local
+  
+  # CORS Configuration - Permissive for local development
   cors:
-    allowed-origins: "http://localhost:3000,http://localhost:8080"
-    allowed-methods: "GET,POST,PUT,DELETE,OPTIONS"
+    allowed-origins: "http://localhost:3000,http://localhost:8080,http://localhost:8081"
+    allowed-methods: "*"
     allowed-headers: "*"
     allow-credentials: true
+    max-age: 3600
+  
+  # JWT Configuration - Simple for local development
   jwt:
-    secret: local-jwt-secret-key-for-development-only
+    secret: "local-development-secret-key-not-for-production"
     expiration: 86400000  # 24 hours
+    refresh-expiration: 604800000  # 7 days
+    issuer: "local-java-app"
+  
+  # Rate Limiting - Disabled for local development
+  rate-limit:
+    enabled: false
+    
+  # File Upload
+  upload:
+    max-file-size: 10MB
+    max-request-size: 50MB
+    temp-dir: ${java.io.tmpdir}/uploads
+
+# Spring Boot Configuration Management
+# Local development profile-based configuration
+config:
+  profile:
+    management:
+      enabled: true
+      source: "spring-boot-profiles"
+      sensitive-data-handling: "local-properties"
+      debug:
+        enabled: true
+        show-active-profiles: true
+        show-property-sources: true
+
+# Development Features
+debug:
+  enabled: true
+  sql-queries: true
+  cache-operations: true
+  request-response-logging: true
+  security-events: true
+
+# Local development secrets (not for production)
+local:
+  secrets:
+    # These would normally come from Kubernetes secrets in other environments
+    database:
+      password: "local-dev-password"
+    jwt:
+      secret: "local-development-secret-key"
+    api:
+      key: "local-api-key"

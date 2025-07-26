@@ -42,19 +42,22 @@ docker run -p 8080:8080 java-backend1
 - **production**: Production environment with all features
 
 ### Environment Variables
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DB_HOST` | Database host | localhost |
-| `DB_PORT` | Database port | 5432 |
-| `DB_NAME` | Database name | java_backend1_dev |
-| `DB_USERNAME` | Database username | app_user |
-| `DB_PASSWORD` | Database password | (required) |
-| `REDIS_HOST` | Redis host | localhost |
-| `REDIS_PORT` | Redis port | 6379 |
+| Variable | Description | Default | Source |
+|----------|-------------|---------|--------|
+| `DB_HOST` | Database host | localhost | ConfigMap |
+| `DB_PORT` | Database port | 5432 | ConfigMap |
+| `DB_NAME` | Database name | java_backend1_dev | ConfigMap |
+| `DB_USERNAME` | Database username | app_user | ConfigMap |
+| `DB_PASSWORD` | Database password | (required) | Kubernetes Secret |
+| `REDIS_HOST` | Redis host | localhost | ConfigMap |
+| `REDIS_PORT` | Redis port | 6379 | ConfigMap |
+| `REDIS_PASSWORD` | Redis password | (required) | Kubernetes Secret |
+| `JWT_SECRET` | JWT signing secret | (required) | Kubernetes Secret |
+| `API_KEY` | External API key | (required) | Kubernetes Secret |
 
 ## 🚀 Deployment
 
-This service uses shared GitHub Actions workflows from the `shared-github-actions` branch.
+This service uses shared GitHub Actions workflows from the `no-keyvault-shared-github-actions` branch with Spring Boot profile-based configuration management.
 
 ### Manual Deployment
 ```bash
@@ -146,8 +149,8 @@ docker run -p 8080:8080 \
 
 This repository uses a branch-based approach:
 
-- **`shared-github-actions`**: Shared CI/CD workflows and composite actions
-- **`my-java-app`**: This Spring Boot application (current branch)
+- **`no-keyvault-shared-github-actions`**: Shared CI/CD workflows with Spring Boot profile-based configuration
+- **`no-keyvault-my-app`**: This Spring Boot application (current branch)
 - **`main`**: Production releases
 
 ### Workflow Integration
@@ -155,8 +158,35 @@ This repository uses a branch-based approach:
 The deployment workflow references shared workflows:
 
 ```yaml
-uses: ./.github/workflows/shared-deploy.yml@shared-github-actions
+uses: ./.github/workflows/shared-deploy.yml@no-keyvault-shared-github-actions
 ```
+
+## 🔐 Configuration & Secrets Management
+
+### Spring Boot Profile-Based Configuration
+This application uses Spring Boot profiles for environment-specific configuration:
+- **Local**: H2 in-memory database, simple caching, debug logging
+- **Dev**: PostgreSQL, Redis, development-friendly settings  
+- **Staging**: Production-like settings with enhanced monitoring
+- **Production**: Full security, performance optimization, minimal logging
+
+### Secret Management Strategy
+- **Kubernetes Secrets**: Sensitive data (passwords, API keys, JWT secrets)
+- **ConfigMaps**: Non-sensitive configuration (URLs, ports, feature flags)
+- **Spring Profiles**: Environment-specific behavior and settings
+
+### Required Deployment Secrets
+The deployment workflow requires these secrets:
+- `ACR_LOGIN_SERVER` - Azure Container Registry
+- `AZURE_TENANT_ID` - Azure tenant  
+- `AZURE_CLIENT_ID` - Azure service principal
+- `AZURE_SUBSCRIPTION_ID` - Azure subscription
+
+### Application Secrets (Kubernetes)
+- `DB_PASSWORD` - Database password
+- `REDIS_PASSWORD` - Redis password
+- `JWT_SECRET` - JWT signing secret  
+- `API_KEY` - External service API key
 
 ## 📚 Documentation
 
@@ -209,7 +239,8 @@ This project is licensed under the MIT License.
 ---
 
 **Service**: Java Backend1  
-**Branch**: my-java-app  
+**Branch**: no-keyvault-my-app  
 **Type**: Spring Boot Microservice  
-**Shared Workflows**: shared-github-actions branch  
+**Configuration**: Spring Boot Profile-based (no external key vault)  
+**Shared Workflows**: no-keyvault-shared-github-actions branch  
 **Deployment**: GitHub Actions + Kubernetes + Helm

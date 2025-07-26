@@ -258,14 +258,23 @@ app:
       referrer-policy: strict-origin-when-cross-origin
       permissions-policy: ${PERMISSIONS_POLICY}
 
-# Azure Configuration
+# Spring Boot Configuration Management
+# Production-grade profile-based configuration
+config:
+  profile:
+    management:
+      enabled: true
+      source: "spring-boot-profiles"
+      sensitive-data-handling: "kubernetes-secrets"
+      encryption:
+        enabled: true
+        algorithm: "AES-256-GCM"
+      validation:
+        strict-mode: true
+        required-properties: "DB_PASSWORD,JWT_SECRET,REDIS_PASSWORD"
+
+# Azure Configuration (Non-KeyVault)
 azure:
-  keyvault:
-    enabled: ${AZURE_KEYVAULT_ENABLED:true}
-    uri: ${AZURE_KEYVAULT_URI}
-    client-id: ${AZURE_KEYVAULT_CLIENT_ID}
-    client-secret: ${AZURE_KEYVAULT_CLIENT_SECRET}
-    tenant-id: ${AZURE_TENANT_ID}
   
   application-insights:
     instrumentation-key: ${AZURE_APP_INSIGHTS_KEY}

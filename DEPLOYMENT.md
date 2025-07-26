@@ -1,6 +1,6 @@
 # Java Backend1 Deployment Guide
 
-This service is deployed from the `my-java-app` branch using shared workflows from the `shared-github-actions` branch.
+This service is deployed from the `no-keyvault-my-app` branch using shared workflows from the `no-keyvault-shared-github-actions` branch with Spring Boot profile-based configuration management.
 
 
 This document describes how to deploy the User Management Service using the integrated GitHub Actions workflow.
@@ -133,14 +133,33 @@ curl https://dev.mydomain.com/backend1/actuator/health
 curl https://dev.mydomain.com/backend1/api/status
 ```
 
-## 🔐 **Authentication & Secrets**
+## 🔐 **Configuration & Secrets Management**
 
+### Spring Boot Profile-Based Configuration
+The application uses environment-specific Spring Boot profiles:
+- **Dev**: Development profile with PostgreSQL, debug logging, permissive CORS
+- **Staging**: Production-like settings with enhanced monitoring and validation
+- **Production**: Optimized for performance, security, and minimal resource usage
+- **Local**: H2 in-memory database for local development
+
+### Secret Management Strategy
+- **Kubernetes Secrets**: Database passwords, JWT secrets, API keys
+- **ConfigMaps**: Non-sensitive configuration like URLs, timeouts, feature flags
+- **Spring Profiles**: Environment-specific application behavior
+
+### Required Deployment Secrets
 The deployment workflow requires these secrets:
 - `ACR_LOGIN_SERVER` - Azure Container Registry
-- `KEYVAULT_NAME` - Azure Key Vault for secrets
 - `AZURE_TENANT_ID` - Azure tenant
-- `AZURE_CLIENT_ID` - Azure service principal
+- `AZURE_CLIENT_ID` - Azure service principal  
 - `AZURE_SUBSCRIPTION_ID` - Azure subscription
+
+### Application Runtime Secrets (Kubernetes)
+These are automatically injected into the application container:
+- `DB_PASSWORD` - Database connection password
+- `REDIS_PASSWORD` - Redis authentication password
+- `JWT_SECRET` - JWT token signing secret
+- `API_KEY` - External service API authentication key
 
 ## 📋 **Deployment Checklist**
 
@@ -152,7 +171,9 @@ Before deploying to production:
 - [ ] Security scan completed
 - [ ] Performance testing completed
 - [ ] Helm chart values updated
-- [ ] Environment variables configured
+- [ ] Spring Boot profiles configured for target environment
+- [ ] Kubernetes secrets created with required values
+- [ ] ConfigMaps updated with environment-specific settings
 - [ ] Database migrations ready (if applicable)
 - [ ] Monitoring alerts configured
 
@@ -199,14 +220,30 @@ gh workflow run rollback-deployment.yml \
    kubectl get endpoints java-backend1-dev -n dev
    ```
 
+4. **Configuration Issues**
+   ```bash
+   # Check active Spring profiles
+   curl http://localhost:8080/actuator/env | jq '.activeProfiles'
+   
+   # View configuration properties
+   curl http://localhost:8080/actuator/configprops
+   
+   # Check ConfigMap
+   kubectl get configmap java-backend1-dev-config -n dev -o yaml
+   
+   # Check secrets (without exposing values)
+   kubectl get secret app-secrets -n dev
+   ```
+
 ## 📞 **Support**
 
 For deployment issues:
 1. Check GitHub Actions logs
 2. Review Kubernetes pod logs
 3. Check Azure Container Registry access
-4. Verify Azure Key Vault permissions
-5. Contact DevOps team if issues persist
+4. Verify Kubernetes secrets and ConfigMaps are properly configured
+5. Validate Spring Boot profile configuration
+6. Contact DevOps team if issues persist
 
 ---
 

@@ -159,30 +159,40 @@ monitoring:
 tests:
   enabled: false
 
-# Azure Key Vault integration
-azureKeyVault:
-  enabled: false
-  keyvaultName: ""
-  tenantId: ""
-  userAssignedIdentityID: ""
-  mountPath: "/mnt/secrets-store"
+# Spring Boot Profile-based Configuration Management
+springBootProfile:
+  enabled: true
+  activeProfile: "dev"
+  configLocation: "classpath:application.yml"
+  secretManagement:
+    enabled: true
+    type: "kubernetes-secrets"
+    secretName: "app-secrets"
+    configMapName: "app-config"
+  
+# Kubernetes Secrets Configuration (replaces Azure Key Vault)
+kubernetesSecrets:
+  enabled: true
+  secretName: "app-secrets"
   secrets:
-    - objectName: "db-password"
-      objectAlias: "db-password"
-    - objectName: "api-key"
-      objectAlias: "api-key"
-    - objectName: "jwt-secret"
-      objectAlias: "jwt-secret"
-  secretObjects:
-    - secretName: "app-secrets"
-      type: "Opaque"
-      data:
-        - objectName: "db-password"
-          key: "db-password"
-        - objectName: "api-key"  
-          key: "api-key"
-        - objectName: "jwt-secret"
-          key: "jwt-secret"
+    - name: "DB_PASSWORD"
+      key: "db-password"
+    - name: "JWT_SECRET" 
+      key: "jwt-secret"
+    - name: "REDIS_PASSWORD"
+      key: "redis-password"
+    - name: "API_KEY"
+      key: "api-key"
+
+# Kubernetes ConfigMap Configuration
+kubernetesConfigMap:
+  enabled: true
+  configMapName: "app-config"
+  data:
+    SPRING_PROFILES_ACTIVE: "{{ .Values.global.environment }}"
+    APPLICATION_NAME: "{{ .Values.global.applicationName }}"
+    ENVIRONMENT: "{{ .Values.global.environment }}"
+    LOG_LEVEL: "INFO"
 
 # Monitoring configuration
 monitoring:

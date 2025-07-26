@@ -183,11 +183,23 @@ app:
     advanced-search: ${FEATURE_ADVANCED_SEARCH:true}
     beta-features: ${FEATURE_BETA:true}
 
-# Azure Configuration
+# Spring Boot Configuration Management
+# Staging environment profile-based configuration
+config:
+  profile:
+    management:
+      enabled: true
+      source: "spring-boot-profiles"
+      sensitive-data-handling: "kubernetes-secrets"
+      encryption:
+        enabled: true
+        algorithm: "AES-256-GCM"
+      validation:
+        enabled: true
+        required-properties: "DB_PASSWORD,JWT_SECRET,REDIS_PASSWORD"
+
+# Azure Configuration (Non-KeyVault)
 azure:
-  keyvault:
-    enabled: ${AZURE_KEYVAULT_ENABLED:true}
-    uri: ${AZURE_KEYVAULT_URI}
   
   application-insights:
     instrumentation-key: ${AZURE_APP_INSIGHTS_KEY}

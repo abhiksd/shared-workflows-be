@@ -150,11 +150,14 @@ app:
     max-request-size: 50MB
     temp-dir: ${TEMP_DIR:/tmp/uploads}
 
-# Azure Key Vault (if used)
-azure:
-  keyvault:
-    enabled: ${AZURE_KEYVAULT_ENABLED:false}
-    uri: ${AZURE_KEYVAULT_URI:}
+# Spring Boot Configuration Management
+# Profile-based configuration without external key vault dependency
+config:
+  profile:
+    management:
+      enabled: true
+      source: "spring-boot-profiles"
+      sensitive-data-handling: "kubernetes-secrets"
     
 # Development Features
 debug:

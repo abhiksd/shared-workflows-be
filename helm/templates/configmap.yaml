@@ -43,12 +43,14 @@ data:
   {{- end }}
   logging.pattern.console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
   logging.pattern.file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
-  # Azure Key Vault Integration
-  {{- if .Values.azureKeyVault.enabled }}
-  spring.cloud.azure.keyvault.secret.enabled: "true"
-  spring.cloud.azure.keyvault.secret.property-sources[0].endpoint: "https://{{ .Values.azureKeyVault.keyvaultName }}.vault.azure.net/"
-  spring.cloud.azure.keyvault.secret.property-sources[0].name: "{{ .Values.azureKeyVault.keyvaultName }}"
-  {{- end }}
+  # Spring Boot Profile-based Configuration Management
+  spring.config.location: "classpath:application.yml,classpath:application-{{ .Values.global.environment }}.yml"
+  spring.config.name: "application"
+  spring.config.import: "optional:configtree:/etc/secrets/"
+  # Configuration management metadata
+  config.management.type: "spring-boot-profiles"
+  config.management.source: "kubernetes-configmap"
+  config.environment: {{ .Values.global.environment | quote }}
   # Environment-specific properties file
   application-{{ .Values.global.environment }}.yml: |
     spring:
@@ -56,16 +58,22 @@ data:
         active: {{ .Values.global.environment }}
       application:
         name: {{ .Values.global.applicationName }}
-      {{- if .Values.azureKeyVault.enabled }}
-      cloud:
-        azure:
-          keyvault:
-            secret:
-              enabled: true
-              property-sources:
-                - endpoint: https://{{ .Values.azureKeyVault.keyvaultName }}.vault.azure.net/
-                  name: {{ .Values.azureKeyVault.keyvaultName }}
-      {{- end }}
+      # Spring Boot profile-based configuration
+      config:
+        import: "optional:configtree:/etc/secrets/"
+        location: "classpath:application.yml,classpath:application-{{ .Values.global.environment }}.yml"
+      # Profile management configuration
+      profiles:
+        group:
+          {{ .Values.global.environment }}: "common,{{ .Values.global.environment }}"
+      # External configuration sources
+      externalized-configuration:
+        enabled: true
+        sources:
+          - name: "kubernetes-configmap"
+            type: "configmap"
+          - name: "kubernetes-secrets"
+            type: "secret"
     server:
       port: {{ .Values.service.port }}
     management:
