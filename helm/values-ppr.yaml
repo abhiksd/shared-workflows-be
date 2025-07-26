@@ -1,6 +1,9 @@
 # Pre-Production environment values for java-backend1
 global:
   environment: ppr
+  # Blue-Green deployment support
+  blueGreenEnabled: true
+  deploymentSlot: "{{ .Values.global.deploymentSlot | default \"blue\" }}"
   applicationName: java-backend1
   applicationType: java-springboot
 
@@ -36,6 +39,8 @@ env:
     value: "ppr"
   - name: LOG_LEVEL
     value: "WARN"
+  - name: DEPLOYMENT_SLOT
+    value: "{{ .Values.global.deploymentSlot | default \"blue\" }}"
 
 autoscaling:
   enabled: true
