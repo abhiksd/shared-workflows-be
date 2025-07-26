@@ -139,6 +139,10 @@ jobs:
           # Define authorized users for PPR and PROD deployments
           AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
           
+          # Future enhancement: Team-based authorization
+          # AUTHORIZED_TEAMS="devops-team,release-team,platform-team,emergency-team"
+          # ORG_NAME="your-org-name"  # Set your GitHub organization name
+          
           # Function to check if user is authorized for protected environments
           is_authorized_user() {
             local user="$1"
@@ -147,6 +151,27 @@ jobs:
             else
               return 1
             fi
+          }
+          
+          # Future enhancement: Function to check team membership via GitHub API
+          # Requires GITHUB_TOKEN with read:org scope
+          is_user_in_authorized_teams() {
+            local user="$1"
+            
+            # Uncomment and configure when implementing team-based authorization
+            # local teams=("devops-team" "release-team" "platform-team" "emergency-team")
+            # 
+            # for team in "${teams[@]}"; do
+            #   response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            #     "https://api.github.com/orgs/$ORG_NAME/teams/$team/memberships/$user")
+            #   
+            #   if echo "$response" | jq -e '.state == "active"' > /dev/null 2>&1; then
+            #     echo "✅ User $user is member of $team"
+            #     return 0
+            #   fi
+            # done
+            
+            return 1  # Default: no team membership found
           }
           
           # Function to validate protected environment deployment
@@ -159,10 +184,16 @@ jobs:
             # Check if it's a manual deployment attempting override
             if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
               
-              # Check if user is authorized
-              if ! is_authorized_user "$ACTOR"; then
+              # Check if user is authorized (individual users)
+              if is_authorized_user "$ACTOR"; then
+                echo "✅ User '$ACTOR' individually authorized for $env deployment"
+              # Future enhancement: Check team membership
+              # elif is_user_in_authorized_teams "$ACTOR"; then
+              #   echo "✅ User '$ACTOR' authorized via team membership for $env deployment"
+              else
                 echo "❌ User '$ACTOR' is not authorized for $env deployments"
                 echo "   Authorized users: $AUTHORIZED_USERS"
+                # echo "   Authorized teams: $AUTHORIZED_TEAMS"  # Future enhancement
                 return 1
               fi
               
