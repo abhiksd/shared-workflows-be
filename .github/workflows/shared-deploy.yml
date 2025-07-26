@@ -63,16 +63,7 @@ on:
         required: false
         type: boolean
         default: false
-      emergency_bypass_sonar:
-        description: '🚨 EMERGENCY: Bypass SonarQube scan (authorized users only, audit required)'
-        required: false
-        type: boolean
-        default: false
-      emergency_bypass_checkmarx:
-        description: '🚨 EMERGENCY: Bypass Checkmarx scan (authorized users only, audit required)'
-        required: false
-        type: boolean
-        default: false
+
     secrets: inherit
 
 env:
@@ -439,14 +430,17 @@ jobs:
       - name: 🚨 Emergency Bypass Check - SonarQube
         id: bypass-check
         run: |
-          BYPASS_SONAR="${{ inputs.emergency_bypass_sonar }}"
+          # Read emergency bypass settings from repository variables
+          BYPASS_SONAR="${{ vars.EMERGENCY_BYPASS_SONAR || 'false' }}"
           ACTOR="${{ github.actor }}"
           EVENT_NAME="${{ github.event_name }}"
+          ENVIRONMENT="${{ needs.validate-environment.outputs.target_environment }}"
           
-          echo "🔍 Checking SonarQube emergency bypass request..."
-          echo "   Bypass requested: $BYPASS_SONAR"
+          echo "🔍 Checking SonarQube emergency bypass configuration..."
+          echo "   Bypass enabled (EMERGENCY_BYPASS_SONAR): $BYPASS_SONAR"
           echo "   Requested by: $ACTOR"
           echo "   Event type: $EVENT_NAME"
+          echo "   Target environment: $ENVIRONMENT"
           
           # Define authorized users for emergency bypass (same as deployment authorization)
           AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
@@ -462,21 +456,41 @@ jobs:
           }
           
           if [[ "$BYPASS_SONAR" == "true" ]]; then
-            if [[ "$EVENT_NAME" == "workflow_dispatch" ]] && is_authorized_user "$ACTOR"; then
-              echo "🚨 EMERGENCY BYPASS APPROVED: SonarQube scan will be bypassed"
+            # Emergency bypass is enabled - check authorization
+            if is_authorized_user "$ACTOR"; then
+              echo "🚨 EMERGENCY BYPASS ACTIVATED: SonarQube scan will be bypassed"
+              echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
               echo "   Authorized user: $ACTOR"
-              echo "   Reason: Emergency deployment bypass"
-              echo "   ⚠️  SECURITY WARNING: Quality gate bypassed - manual review required"
+              echo "   Target environment: $ENVIRONMENT"
+              echo "   Reason: Emergency deployment bypass (repository configuration)"
+              echo "   ⚠️  SECURITY WARNING: Quality gate bypassed - immediate manual review required"
+              echo ""
+              echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
+              echo "   ✅ EMERGENCY_BYPASS_SONAR variable set to 'true'"
+              echo "   ✅ User '$ACTOR' is in authorized users list"
+              echo "   ✅ Bypass approved for emergency deployment"
+              echo ""
+              echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
+              echo "   1. Disable EMERGENCY_BYPASS_SONAR variable immediately after deployment"
+              echo "   2. Conduct manual security review of deployed code"
+              echo "   3. Schedule retroactive SonarQube scan"
+              echo "   4. Document emergency bypass justification"
               echo "bypass_approved=true" >> $GITHUB_OUTPUT
             else
               echo "❌ EMERGENCY BYPASS DENIED: User '$ACTOR' not authorized for security scan bypass"
+              echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
               echo "   Authorized users: $AUTHORIZED_USERS"
-              echo "   Event type: $EVENT_NAME"
+              echo "   Current user: $ACTOR"
+              echo ""
+              echo "🔒 SECURITY PROTECTION: Even with emergency bypass enabled,"
+              echo "    only authorized users can perform emergency deployments."
               echo "bypass_approved=false" >> $GITHUB_OUTPUT
               exit 1
             fi
           else
             echo "✅ Normal SonarQube scan will proceed"
+            echo "   Repository variable EMERGENCY_BYPASS_SONAR: false (default)"
+            echo "   Standard quality gate validation active"
             echo "bypass_approved=false" >> $GITHUB_OUTPUT
           fi
 
@@ -527,9 +541,10 @@ jobs:
     needs: [validate-environment, setup, maven-build]
     if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && !failure() && !cancelled()
     outputs:
-      scan_status: ${{ steps.checkmarx.outputs.scan_status }}
+      scan_status: ${{ steps.determine-status.outputs.final_status }}
       overall_results: ${{ steps.checkmarx.outputs.overall_results }}
       scan_id: ${{ steps.checkmarx.outputs.scan_id }}
+      bypass_reason: ${{ steps.determine-status.outputs.bypass_reason }}
     steps:
       - name: Clean workspace
         uses: ./.github/actions/workspace-cleanup
@@ -547,8 +562,76 @@ jobs:
           name: ${{ needs.maven-build.outputs.jar_artifact }}
           path: ${{ inputs.build_context }}
 
+      - name: 🚨 Emergency Bypass Check - Checkmarx
+        id: bypass-check
+        run: |
+          # Read emergency bypass settings from repository variables
+          BYPASS_CHECKMARX="${{ vars.EMERGENCY_BYPASS_CHECKMARX || 'false' }}"
+          ACTOR="${{ github.actor }}"
+          EVENT_NAME="${{ github.event_name }}"
+          ENVIRONMENT="${{ needs.validate-environment.outputs.target_environment }}"
+          
+          echo "🔍 Checking Checkmarx emergency bypass configuration..."
+          echo "   Bypass enabled (EMERGENCY_BYPASS_CHECKMARX): $BYPASS_CHECKMARX"
+          echo "   Requested by: $ACTOR"
+          echo "   Event type: $EVENT_NAME"
+          echo "   Target environment: $ENVIRONMENT"
+          
+          # Define authorized users for emergency bypass (same as deployment authorization)
+          AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
+          
+          # Function to check if user is authorized
+          is_authorized_user() {
+            local user="$1"
+            if [[ ",$AUTHORIZED_USERS," == *",$user,"* ]]; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
+          if [[ "$BYPASS_CHECKMARX" == "true" ]]; then
+            # Emergency bypass is enabled - check authorization
+            if is_authorized_user "$ACTOR"; then
+              echo "🚨 EMERGENCY BYPASS ACTIVATED: Checkmarx scan will be bypassed"
+              echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
+              echo "   Authorized user: $ACTOR"
+              echo "   Target environment: $ENVIRONMENT"
+              echo "   Reason: Emergency deployment bypass (repository configuration)"
+              echo "   ⚠️  SECURITY WARNING: Security scan bypassed - immediate manual review required"
+              echo ""
+              echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
+              echo "   ✅ EMERGENCY_BYPASS_CHECKMARX variable set to 'true'"
+              echo "   ✅ User '$ACTOR' is in authorized users list"
+              echo "   ✅ Bypass approved for emergency deployment"
+              echo ""
+              echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
+              echo "   1. Disable EMERGENCY_BYPASS_CHECKMARX variable immediately after deployment"
+              echo "   2. Conduct manual security review of deployed code"
+              echo "   3. Schedule retroactive Checkmarx security scan"
+              echo "   4. Document emergency bypass justification"
+              echo "bypass_approved=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ EMERGENCY BYPASS DENIED: User '$ACTOR' not authorized for security scan bypass"
+              echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
+              echo "   Authorized users: $AUTHORIZED_USERS"
+              echo "   Current user: $ACTOR"
+              echo ""
+              echo "🔒 SECURITY PROTECTION: Even with emergency bypass enabled,"
+              echo "    only authorized users can perform emergency deployments."
+              echo "bypass_approved=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "✅ Normal Checkmarx scan will proceed"
+            echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: false (default)"
+            echo "   Standard security scan validation active"
+            echo "bypass_approved=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkmarx Scan
         id: checkmarx
+        if: steps.bypass-check.outputs.bypass_approved != 'true'
         uses: ./.github/actions/checkmarx-scan
         with:
           application_name: ${{ inputs.application_name }}
@@ -568,10 +651,35 @@ jobs:
           checkmarx_medium_threshold: ${{ vars.CHECKMARX_MEDIUM_THRESHOLD || '5' }}
           checkmarx_low_threshold: ${{ vars.CHECKMARX_LOW_THRESHOLD || '10' }}
 
+      - name: Determine Final Checkmarx Status
+        id: determine-status
+        run: |
+          BYPASS_APPROVED="${{ steps.bypass-check.outputs.bypass_approved }}"
+          SCAN_STATUS="${{ steps.checkmarx.outputs.scan_status }}"
+          ACTOR="${{ github.actor }}"
+          
+          if [[ "$BYPASS_APPROVED" == "true" ]]; then
+            echo "🚨 Checkmarx scan bypassed for emergency deployment"
+            echo "final_status=BYPASSED" >> $GITHUB_OUTPUT
+            echo "bypass_reason=Emergency bypass by $ACTOR" >> $GITHUB_OUTPUT
+            
+            # Log emergency bypass for audit trail
+            echo "📋 EMERGENCY BYPASS AUDIT LOG:"
+            echo "   Tool: Checkmarx"
+            echo "   User: $ACTOR"
+            echo "   Timestamp: $(date -u)"
+            echo "   Justification: Emergency deployment bypass"
+            echo "   ⚠️  Manual security review required post-deployment"
+          else
+            echo "✅ Checkmarx scan completed normally"
+            echo "final_status=${SCAN_STATUS:-FAILED}" >> $GITHUB_OUTPUT
+            echo "bypass_reason=N/A" >> $GITHUB_OUTPUT
+          fi
+
   build:
     runs-on: ubuntu-latest
     needs: [validate-environment, setup, maven-build, sonar-scan, checkmarx-scan]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && !failure() && !cancelled()
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && !failure() && !cancelled()
     steps:
       - name: Clean workspace and Docker
         uses: ./.github/actions/workspace-cleanup
@@ -607,7 +715,7 @@ jobs:
   production-approval:
     runs-on: ubuntu-latest
     needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && needs.validate-environment.outputs.target_environment == 'prod' && !failure() && !cancelled()
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && needs.validate-environment.outputs.target_environment == 'prod' && !failure() && !cancelled()
     environment: 
       name: production-approval
       url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -627,6 +735,22 @@ jobs:
           echo "   SonarQube: ${{ needs.sonar-scan.outputs.scan_status }}"
           echo "   Checkmarx: ${{ needs.checkmarx-scan.outputs.scan_status }}"
           echo ""
+          # Display emergency bypass information if applicable
+          if [[ "${{ needs.sonar-scan.outputs.scan_status }}" == "BYPASSED" ]]; then
+            echo "🚨 EMERGENCY BYPASS ALERT - SonarQube:"
+            echo "   Status: BYPASSED"
+            echo "   Reason: ${{ needs.sonar-scan.outputs.bypass_reason }}"
+            echo "   ⚠️  Manual security review required post-deployment"
+            echo ""
+          fi
+          if [[ "${{ needs.checkmarx-scan.outputs.scan_status }}" == "BYPASSED" ]]; then
+            echo "🚨 EMERGENCY BYPASS ALERT - Checkmarx:"
+            echo "   Status: BYPASSED" 
+            echo "   Reason: ${{ needs.checkmarx-scan.outputs.bypass_reason }}"
+            echo "   ⚠️  Manual security review required post-deployment"
+            echo ""
+          fi
+          echo ""
           echo "👥 Awaiting manual approval from authorized personnel..."
           echo "⏳ This deployment will proceed only after manual approval."
 
@@ -638,8 +762,8 @@ jobs:
     if: |
       needs.validate-environment.outputs.should_deploy == 'true' && 
       needs.setup.outputs.should_deploy == 'true' && 
-      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
-      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && 
+      (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && 
       !failure() && !cancelled() &&
       (
         needs.validate-environment.outputs.target_environment != 'prod' ||
