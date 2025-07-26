@@ -771,18 +771,9 @@ jobs:
           version: ${{ needs.setup.outputs.version }}
           application_name: ${{ inputs.application_name }}
 
-  # deploy-monitoring: REMOVED - Should be separate workflow triggered only by monitoring changes
-  # Monitoring deployments should be independent of application deployments
-  # Use manual dispatch or separate monitoring-specific workflow instead
-
-  # cleanup:
-  #   runs-on: ubuntu-latest
-  #   #needs: [validate-environment, setup, maven-build, sonar-scan, checkmarx-scan, build, deploy, create_release]
-  #   needs: [validate-environment, setup, maven-build, build, deploy, create_release]
-  #   if: always() && needs.validate-environment.outputs.should_deploy == 'true'
-  #   steps:
-  #     - name: Final comprehensive cleanup
-  #       uses: ./.github/actions/workspace-cleanup
-  #       with:
-  #         cleanup_docker: 'true'
-  #         cleanup_temp: 'true'
+  # Note: Cleanup is handled by:
+  # 1. Individual job cleanup (workspace-cleanup action in each job)
+  # 2. Smart Docker cleanup with build optimization
+  # 3. Scheduled cleanup workflows for runner maintenance
+  # Comprehensive end-of-workflow cleanup intentionally omitted to preserve
+  # build cache and optimize subsequent deployment performance.

@@ -8,6 +8,10 @@ inputs:
   application_name:
     description: 'Application name'
     required: true
+  custom_image_tag:
+    description: 'Custom image tag override'
+    required: false
+    default: ''
 
 outputs:
   version:
@@ -38,11 +42,28 @@ runs:
       run: |
         echo "Current branch: ${{ github.ref }}"
         echo "Environment: ${{ inputs.environment }}"
+        echo "Custom image tag: ${{ inputs.custom_image_tag }}"
         
         # Initialize variables
         VERSION=""
         IMAGE_TAG=""
         HELM_VERSION=""
+        
+        # Check if custom image tag is provided
+        if [[ -n "${{ inputs.custom_image_tag }}" ]]; then
+          echo "Using custom image tag: ${{ inputs.custom_image_tag }}"
+          VERSION="${{ inputs.custom_image_tag }}"
+          IMAGE_TAG="${{ inputs.custom_image_tag }}"
+          HELM_VERSION="${{ inputs.custom_image_tag }}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "helm_version=${HELM_VERSION}" >> $GITHUB_OUTPUT
+          echo "Final outputs (custom):"
+          echo "  version: ${VERSION}"
+          echo "  image_tag: ${IMAGE_TAG}"
+          echo "  helm_version: ${HELM_VERSION}"
+          exit 0
+        fi
         
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
           # Tag push - use the tag as version
