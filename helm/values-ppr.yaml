@@ -1,6 +1,6 @@
-# Staging environment values for java-backend1
+# Pre-Production environment values for java-backend1
 global:
-  environment: staging
+  environment: ppr
   applicationName: java-backend1
   applicationType: java-springboot
 
@@ -8,41 +8,47 @@ replicaCount: 2
 
 image:
   repository: myregistry.azurecr.io/java-backend1
-  tag: "staging-latest"
+  tag: "ppr-latest"
 
 ingress:
   enabled: true
   pathPrefix: "backend1"
   proxyBodySize: "1024m"
   hosts:
-    - host: staging.mydomain.com
+    - host: ppr.mydomain.com
 
 resources:
   limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
     cpu: 1000m
     memory: 2Gi
-  requests:
-    cpu: 500m
-    memory: 1Gi
 
 env:
   - name: ENVIRONMENT
-    value: "staging"
+    value: "ppr"
   - name: APPLICATION_NAME
     value: "java-backend1"
   - name: SERVER_PORT
     value: "8080"
   - name: SPRING_PROFILES_ACTIVE
-    value: "staging"
+    value: "ppr"
   - name: LOG_LEVEL
     value: "INFO"
 
 autoscaling:
   enabled: true
   minReplicas: 2
-  maxReplicas: 5
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
 
 monitoring:
   enabled: true
   servicemonitor:
     enabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

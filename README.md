@@ -167,13 +167,21 @@ uses: ./.github/workflows/shared-deploy.yml@no-keyvault-shared-github-actions
 This application uses Spring Boot profiles for environment-specific configuration:
 - **Local**: H2 in-memory database, simple caching, debug logging
 - **Dev**: PostgreSQL, Redis, development-friendly settings  
-- **Staging**: Production-like settings with enhanced monitoring
+- **SQE**: System Quality Engineering - production-like settings with enhanced monitoring
+- **PPR**: Pre-Production - final validation environment before production
 - **Production**: Full security, performance optimization, minimal logging
 
 ### Secret Management Strategy
 - **Kubernetes Secrets**: Sensitive data (passwords, API keys, JWT secrets)
 - **ConfigMaps**: Non-sensitive configuration (URLs, ports, feature flags)
 - **Spring Profiles**: Environment-specific behavior and settings
+
+### Automatic Deployment Strategy
+The deployment workflow provides automatic deployment based on branch/tag:
+- **Dev**: Automatic deployment from `develop` branch
+- **SQE**: Automatic deployment from `main` branch  
+- **PPR**: Automatic deployment from `release/*` branches
+- **Production**: Automatic deployment from tags (after PPR validation)
 
 ### Required Deployment Secrets
 The deployment workflow requires these secrets:

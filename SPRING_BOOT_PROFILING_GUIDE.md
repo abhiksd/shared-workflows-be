@@ -28,7 +28,8 @@ src/main/resources/
 ├── application.yml              # Base configuration
 ├── application-local.yml        # Local development
 ├── application-dev.yml          # Development environment
-├── application-staging.yml      # Staging environment
+├── application-sqe.yml          # System Quality Engineering
+├── application-ppr.yml          # Pre-Production environment
 └── application-production.yml   # Production environment
 ```
 
@@ -71,8 +72,8 @@ java -jar target/java-backend1-*.jar
 - ConfigMap: Database URLs, Redis configuration, feature flags
 - Environment Variables: Service endpoints, resource limits
 
-### Staging Profile (`staging`)
-**Purpose**: Production-like testing environment
+### SQE Profile (`sqe`)
+**Purpose**: System Quality Engineering - production-like testing environment
 
 **Features**:
 - Production database setup with connection pooling
@@ -81,6 +82,17 @@ java -jar target/java-backend1-*.jar
 - Security headers enabled
 - Performance monitoring
 - SSL/TLS configuration
+
+### PPR Profile (`ppr`)
+**Purpose**: Pre-Production - final validation before production
+
+**Features**:
+- Production-identical configuration
+- Enhanced monitoring and validation
+- Performance testing capabilities
+- Security validation
+- Final integration testing
+- Production readiness verification
 
 ### Production Profile (`production`)
 **Purpose**: Optimized for performance and security

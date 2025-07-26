@@ -83,11 +83,18 @@ Successfully migrated both the **shared workflow codebase** and **application co
    - Development-friendly settings
    - Enhanced debugging
 
-3. **Staging Profile** (`application-staging.yml`)
-   - Production-like configuration
+3. **SQE Profile** (`application-sqe.yml`)
+   - System Quality Engineering configuration
+   - Production-like settings
    - Enhanced monitoring
    - Security validation
    - Performance optimization
+
+4. **PPR Profile** (`application-ppr.yml`)
+   - Pre-Production environment
+   - Production-identical configuration
+   - Final validation capabilities
+   - Performance testing readiness
 
 4. **Production Profile** (`application-production.yml`)
    - Maximum security
@@ -110,7 +117,7 @@ Successfully migrated both the **shared workflow codebase** and **application co
 
 The `no-keyvault-shared-github-actions` branch provides:
 
-✅ **Multi-environment deployment** (dev, staging, production)  
+✅ **Multi-environment deployment** (dev, sqe, ppr, production)  
 ✅ **Maven build with caching** and dependency management  
 ✅ **Docker image build and push** to container registry  
 ✅ **Helm-based Kubernetes deployment** with profile configuration  
@@ -122,6 +129,11 @@ The `no-keyvault-shared-github-actions` branch provides:
 ✅ **Production approval workflows** for sensitive deployments  
 ✅ **Rollback capabilities** with Helm history management  
 ✅ **Enhanced logging and monitoring** integration  
+✅ **Automatic deployment** based on branch/tag strategy:
+   - **Dev**: Auto-deploy from `develop` branch
+   - **SQE**: Auto-deploy from `main` branch
+   - **PPR**: Auto-deploy from `release/*` branches  
+   - **Production**: Auto-deploy from tags (with PPR validation)  
 
 ### Application Deployment Capabilities
 

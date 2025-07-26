@@ -40,15 +40,16 @@ Trigger manual deployments through GitHub Actions:
 ```bash
 # Using GitHub CLI
 gh workflow run deploy.yml -f environment=dev
-gh workflow run deploy.yml -f environment=staging
-gh workflow run deploy.yml -f environment=production
+gh workflow run deploy.yml -f environment=sqe
+gh workflow run deploy.yml -f environment=ppr
+gh workflow run deploy.yml -f environment=prod
 
 # Or through GitHub UI:
 # Actions → Deploy Java Backend 1 - User Management Service → Run workflow
 ```
 
 **Manual deployment options:**
-- **Environment**: `dev`, `staging`, or `production`
+- **Environment**: `dev`, `sqe`, `ppr`, or `prod`
 - **Force Deploy**: Deploy even if no changes detected
 
 ### 3. **Pull Request Validation**
@@ -79,19 +80,25 @@ jobs:
 - **Branch**: `develop`, `feature/**`
 - **URL**: `https://dev.mydomain.com/backend1`
 - **Namespace**: `dev`
-- **Auto-deploy**: ✅ On push
+- **Auto-deploy**: ✅ On push to develop
 
-### Staging Environment
+### SQE Environment  
+- **Branch**: `main`
+- **URL**: `https://sqe.mydomain.com/backend1`
+- **Namespace**: `sqe`
+- **Auto-deploy**: ✅ On push to main
+
+### Pre-Production Environment
 - **Branch**: `release/**`
-- **URL**: `https://staging.mydomain.com/backend1`
-- **Namespace**: `staging`
-- **Auto-deploy**: ✅ On push
+- **URL**: `https://ppr.mydomain.com/backend1`
+- **Namespace**: `ppr`
+- **Auto-deploy**: ✅ On push to release branches
 
 ### Production Environment
-- **Branch**: `main`
+- **Branch**: Tags
 - **URL**: `https://production.mydomain.com/backend1`
 - **Namespace**: `production`
-- **Auto-deploy**: ✅ On push
+- **Auto-deploy**: ✅ On tag creation (after PPR validation)
 
 ## 📊 **Monitoring & Health Checks**
 
@@ -138,7 +145,8 @@ curl https://dev.mydomain.com/backend1/api/status
 ### Spring Boot Profile-Based Configuration
 The application uses environment-specific Spring Boot profiles:
 - **Dev**: Development profile with PostgreSQL, debug logging, permissive CORS
-- **Staging**: Production-like settings with enhanced monitoring and validation
+- **SQE**: System Quality Engineering - production-like settings with enhanced monitoring and validation
+- **PPR**: Pre-Production - final validation environment with production configuration
 - **Production**: Optimized for performance, security, and minimal resource usage
 - **Local**: H2 in-memory database for local development
 
