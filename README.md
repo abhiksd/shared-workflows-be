@@ -1,287 +1,330 @@
-# Java Backend1 - Blue-Green Deployment Ready
+# 🚀 Java Backend1 - Blue-Green Deployment Pipeline
 
-A Spring Boot microservice with advanced Blue-Green deployment strategy for zero-downtime production releases.
+Enterprise-grade Java Spring Boot microservice with comprehensive Blue-Green deployment strategy using GitHub Actions, Azure Kubernetes Service (AKS), and Helm.
 
-## 🎯 **Overview**
+## 📋 **Quick Start**
 
-This service implements a **Blue-Green deployment strategy** using namespace-based approach within a single AKS cluster, providing:
-- ✅ **Zero-downtime deployments**
-- ✅ **Instant rollback capability** (< 30 seconds)
-- ✅ **Canary traffic validation** (5% → 100%)
-- ✅ **Production approval gates**
-- ✅ **Automated quality checks**
+```bash
+# 🏗️ 1. Set up Azure Infrastructure
+./scripts/azure-setup.sh
 
-## 🏗️ **Deployment Architecture**
+# ⚓ 2. Deploy to Development
+./scripts/deploy.sh -e dev
 
-### **Environment Strategy**
+# 🔵🟢 3. Deploy to Production (Blue-Green)
+./scripts/deploy.sh -e prod -s green
+
+# ✅ 4. Monitor Deployment
+./scripts/monitor-deployment.sh prod
+```
+
+## 🎯 **Project Overview**
+
+### **Deployment Strategy**
+| Environment | Strategy | Approval | Rollback Time | Zero Downtime |
+|-------------|----------|----------|---------------|---------------|
+| **Dev** | Rolling | Auto | ~2 minutes | ❌ |
+| **SQE** | Rolling | Auto | ~3 minutes | ❌ |
+| **PPR** | Blue-Green | Auto | <30 seconds | ✅ |
+| **Prod** | Blue-Green | Manual | <30 seconds | ✅ |
+
+### **Architecture Components**
+- **🏗️ Azure Infrastructure**: ACR, AKS clusters, Key Vault, Monitoring
+- **⚓ Kubernetes Orchestration**: Helm charts with Blue-Green support
+- **🔄 CI/CD Pipeline**: GitHub Actions with quality gates
+- **🔐 Security**: Azure OIDC, Key Vault integration, RBAC
+- **📊 Monitoring**: Application Insights, Prometheus, structured logging
+
+## 📚 **Complete Documentation**
+
+### **🏗️ Infrastructure Setup**
+- **[Azure Infrastructure Setup](docs/AZURE-INFRASTRUCTURE-SETUP.md)** - Complete Azure environment setup
+  - Resource groups, ACR, AKS clusters for all environments
+  - Azure Key Vault configuration and secret management
+  - Service Principal and OIDC federation setup
+  - GitHub secrets and variables configuration
+  - Network security, monitoring, and cost optimization
+  - Step-by-step validation and testing procedures
+
+### **☕ Application Configuration**
+- **[Spring Boot Configuration](docs/SPRING-BOOT-CONFIGURATION.md)** - Comprehensive application setup
+  - Environment-specific profiles (local, dev, sqe, ppr, prod)
+  - Azure Key Vault integration with secret injection
+  - Database configuration with connection pooling
+  - Security configuration with JWT and CORS
+  - Health checks, logging, caching, and performance optimization
+  - Blue-Green deployment support with slot awareness
+
+### **🔄 Rollback Procedures**
+- **[Rollback Procedures](docs/ROLLBACK-PROCEDURES.md)** - Emergency recovery procedures
+  - Environment-specific rollback strategies
+  - Rolling deployment rollback for dev/sqe environments
+  - Blue-Green traffic switch rollback for ppr/prod environments
+  - Database rollback procedures and data consistency
+  - Automated rollback scripts and smart decision making
+  - Post-rollback analysis and prevention best practices
+
+### **⚓ Helm Integration**
+- **[Helm Integration Guide](docs/HELM-INTEGRATION-GUIDE.md)** - Complete Helm chart management
+  - Comprehensive chart structure with Blue-Green templates
+  - Environment-specific values configuration
+  - Helper templates for reusable components
+  - Blue-Green deployment support with namespace isolation
+  - Testing, validation, and troubleshooting procedures
+  - Operational best practices and command references
+
+### **🚀 Deployment Operations**
+- **[Deployment Guide](DEPLOYMENT.md)** - Deployment procedures and workflows
+- **[Quick Reference](docs/QUICK-REFERENCE.md)** - Essential commands and troubleshooting
+
+## 🏗️ **Infrastructure Overview**
+
+### **Azure Resources Created**
 ```yaml
-dev:  Rolling Deployment     # Fast iteration
-sqe:  Rolling Deployment     # System Quality Engineering  
-ppr:  Rolling Deployment     # Pre-Production validation
-prod: Blue-Green + Canary    # Maximum safety
+Resource Groups:
+  - rg-java-backend1-dev     # Development resources
+  - rg-java-backend1-sqe     # SQE testing resources  
+  - rg-java-backend1-ppr     # Pre-production resources
+  - rg-java-backend1-prod    # Production resources
+  - rg-java-backend1-shared  # Shared services (ACR)
+
+AKS Clusters:
+  - aks-java-backend1-dev    # Development cluster
+  - aks-java-backend1-sqe    # SQE testing cluster
+  - aks-java-backend1-ppr    # Pre-production cluster
+  - aks-java-backend1-prod   # Production cluster
+
+Key Vaults:
+  - java-backend1-kv-dev     # Development secrets
+  - java-backend1-kv-sqe     # SQE secrets
+  - java-backend1-kv-ppr     # Pre-production secrets
+  - java-backend1-kv-prod    # Production secrets
+
+Container Registry:
+  - javabackend1registry     # Shared ACR for all environments
 ```
 
-### **Production Blue-Green Architecture**
-```
-Single AKS Cluster: aks-prod-cluster
-├── Namespace: prod-java-backend1-blue (Active)
-│   ├── Deployment: java-backend1 v1.0
-│   ├── Service: java-backend1-service  
-│   └── Pods: 3 replicas
-└── Namespace: prod-java-backend1-green (Target)
-    ├── Deployment: java-backend1 v2.0
-    ├── Service: java-backend1-service
-    └── Pods: 3 replicas
+### **Namespace Strategy (Blue-Green)**
+```yaml
+Development/SQE: default namespace (rolling deployment)
+Pre-Production:
+  - ppr-java-backend1-blue   # Blue slot namespace
+  - ppr-java-backend1-green  # Green slot namespace
+  - default                  # Main ingress for traffic routing
 
-Traffic Manager:
-├── Main Ingress → Blue (100% traffic)
-└── Canary Ingress → Green (0% → 100%)
+Production:
+  - prod-java-backend1-blue  # Blue slot namespace
+  - prod-java-backend1-green # Green slot namespace
+  - default                  # Main ingress for traffic routing
 ```
 
-## 🚀 **Quick Start**
+## 🔄 **Deployment Workflow**
+
+### **Automated CI/CD Pipeline**
+```mermaid
+graph LR
+    A[Code Push] --> B[Quality Gates]
+    B --> C[Build & Test]
+    C --> D[Security Scan]
+    D --> E[Dev Deployment]
+    E --> F[SQE Deployment]
+    F --> G[PPR Blue-Green]
+    G --> H[Manual Approval]
+    H --> I[Prod Blue-Green]
+    I --> J[Health Validation]
+    J --> K[Traffic Switch]
+```
+
+### **Quality Gates**
+- **✅ SonarQube**: Code quality, coverage (>80%), security hotspots
+- **✅ Checkmarx**: Security vulnerability scanning
+- **✅ Unit Tests**: Automated testing with coverage reports
+- **✅ Integration Tests**: API and database connectivity tests
+- **✅ Health Checks**: Application startup and readiness validation
+
+## 🔵🟢 **Blue-Green Deployment**
+
+### **How It Works**
+1. **Deploy to Inactive Slot**: New version deployed to blue/green namespace
+2. **Health Validation**: Automated health checks and smoke tests
+3. **Traffic Switch**: Instant traffic redirection via ingress update
+4. **Rollback Ready**: Previous slot maintained for instant rollback
+
+### **Traffic Routing**
+```yaml
+Production Traffic Flow:
+  api.mydomain.com → NGINX Ingress (default namespace) → Active Slot Namespace
+  
+Pre-Production Traffic Flow:
+  preprod.mydomain.com → NGINX Ingress (default namespace) → Active Slot Namespace
+
+Slot Determination:
+  - Blue Slot: prod-java-backend1-blue namespace
+  - Green Slot: prod-java-backend1-green namespace
+  - Active slot tracked via ingress label: active-slot=blue|green
+```
+
+## 🛠️ **Development Workflow**
 
 ### **Local Development**
 ```bash
-# Build and run locally
-mvn clean spring-boot:run
+# Start local development
+mvn spring-boot:run -Dspring.profiles.active=local
 
-# Run with environment profile
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-
-# Docker development
-docker build -t java-backend1 .
-docker run -p 8080:8080 java-backend1
+# Run with Docker
+docker build -t java-backend1:local .
+docker run -p 8080:8080 java-backend1:local
 ```
 
-### **Deployment Commands**
-
-#### **Automatic Deployment (Branch-based)**
+### **Environment Promotion**
 ```bash
-# Development deployment
-git push origin develop
+# Development
+git push origin develop → Auto deploy to dev
 
-# SQE deployment  
-git push origin main
+# SQE Testing  
+git push origin main → Auto deploy to sqe
 
-# Pre-production deployment
-git checkout -b release/v2.0.0
-git push origin release/v2.0.0
+# Pre-Production
+./scripts/deploy.sh -e ppr → Blue-Green deployment
 
-# Production deployment (with approval)
-git tag v2.0.0
-git push origin v2.0.0
+# Production
+./scripts/deploy.sh -e prod → Manual approval + Blue-Green
 ```
 
-#### **Manual Deployment**
-```bash
-# GitHub CLI deployment
-gh workflow run deploy.yml -f environment=dev
-gh workflow run deploy.yml -f environment=sqe  
-gh workflow run deploy.yml -f environment=ppr
-gh workflow run deploy.yml -f environment=prod
-
-# Force deployment (skip change detection)
-gh workflow run deploy.yml -f environment=prod -f force_deploy=true
-```
-
-## 🛡️ **Production Deployment Flow**
-
-### **Phase 1: Quality Gates**
-```yaml
-1. Code pushed to tag (refs/tags/v*)
-2. Maven build and testing
-3. SonarQube quality analysis (must pass)
-4. Checkmarx security scan (must pass)
-5. Docker image build and push
-```
-
-### **Phase 2: Blue-Green Preparation**
-```yaml
-6. Detect current active slot (blue/green)
-7. Deploy new version to inactive slot
-8. Health checks on new deployment
-9. Smoke tests and validation
-```
-
-### **Phase 3: Manual Approval**
-```yaml
-10. Manual approval required in GitHub Actions
-11. Approval shows:
-    - Application version and details
-    - Quality gate status
-    - Deployment slot information
-    - AKS cluster details
-```
-
-### **Phase 4: Canary Validation**
-```yaml
-12. Start canary traffic: 5% to new version
-13. Monitor for 5 minutes (configurable)
-14. Increase traffic: 5% → 10% → 25% → 50%
-15. Monitor health metrics at each step
-16. Auto-rollback if thresholds exceeded
-```
-
-### **Phase 5: Production Switch**
-```yaml
-17. Full traffic switch: 100% to new version
-18. Update ingress and labels
-19. Previous version kept as standby
-20. Deployment complete
-```
-
-## 🔧 **Configuration**
-
-### **Environment Files**
-```
-helm/
-├── values-dev.yaml   # Development environment
-├── values-sqe.yaml   # System Quality Engineering
-├── values-ppr.yaml   # Pre-production
-└── values-prod.yaml  # Production (Blue-Green enabled)
-```
-
-### **Blue-Green Configuration (Production)**
-```yaml
-global:
-  environment: prod
-  blueGreenEnabled: true
-  deploymentSlot: "blue"  # Set by workflow
-
-ingress:
-  hosts:
-    - host: api.mydomain.com
-  blueGreen:
-    canaryWeight: 0
-    canaryHeader: "X-Canary-Deploy"
-    canaryHeaderValue: "green"
-```
-
-### **Environment Variables**
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `ENVIRONMENT` | Deployment environment | `prod` |
-| `DEPLOYMENT_SLOT` | Blue-Green slot | `blue`/`green` |
-| `APPLICATION_NAME` | Service identifier | `java-backend1` |
-| `SPRING_PROFILES_ACTIVE` | Spring profile | `prod` |
-
-## 📊 **Monitoring & Health Checks**
+## 📊 **Monitoring & Observability**
 
 ### **Health Endpoints**
-- **Liveness**: `/actuator/health/liveness`
-- **Readiness**: `/actuator/health/readiness`  
-- **Health**: `/actuator/health`
-- **Metrics**: `/actuator/prometheus`
-
-### **Auto-Rollback Triggers**
-```yaml
-Error Rate: > 0.1%
-Response Time: > 2x baseline
-CPU Usage: > 80%
-Memory Usage: > 90%
-Pod Restart Count: > 3
-Custom Business Metrics: Configurable
-```
+- **Application Health**: `/backend1/actuator/health`
+- **Liveness Probe**: `/backend1/actuator/health/liveness`
+- **Readiness Probe**: `/backend1/actuator/health/readiness`
+- **Metrics**: `/backend1/actuator/prometheus`
+- **Deployment Info**: `/backend1/api/deployment/info`
 
 ### **Monitoring Stack**
-- **Prometheus**: Metrics collection
-- **Grafana**: Dashboards and alerting
-- **Azure Monitor**: Infrastructure monitoring
-- **Application Insights**: APM and logging
+- **Application Insights**: Application performance monitoring
+- **Prometheus**: Metrics collection and alerting
+- **Azure Monitor**: Infrastructure and cluster monitoring
+- **Log Analytics**: Centralized log aggregation
+- **Structured Logging**: JSON logs with correlation IDs
 
-## 🔄 **Rollback Procedures**
+## 🔐 **Security Features**
 
-### **Instant Rollback (Production)**
+### **Authentication & Authorization**
+- **Azure OIDC**: Workload identity for GitHub Actions
+- **Service Principal**: Least privilege access to Azure resources
+- **RBAC**: Role-based access control for Kubernetes resources
+
+### **Secret Management**
+- **Azure Key Vault**: Centralized secret storage
+- **Environment Isolation**: Separate Key Vaults per environment
+- **Secret Injection**: Runtime secret mounting in pods
+- **Secret Rotation**: Automated secret lifecycle management
+
+### **Container Security**
+- **Non-root User**: Containers run with limited privileges
+- **Read-only Filesystem**: Immutable container runtime
+- **Security Scanning**: Automated vulnerability detection
+- **Network Policies**: Pod-to-pod communication restrictions
+
+## 🚀 **Quick Commands**
+
+### **Deployment**
 ```bash
-# Option 1: GitHub Actions manual trigger
-gh workflow run deploy.yml -f environment=prod -f rollback=true
+# Deploy to development
+./scripts/deploy.sh -e dev
 
-# Option 2: kubectl direct (emergency)
-kubectl patch ingress prod-java-backend1-ingress -n default \
-  -p '{"spec":{"rules":[{"host":"api.mydomain.com","http":{"paths":[{"backend":{"service":{"namespace":"prod-java-backend1-blue"}}}]}}]}}'
+# Deploy to production with specific image
+./scripts/deploy.sh -e prod -i v1.2.3 -s green
+
+# Force deployment (skip validations)
+./scripts/deploy.sh -e ppr -f
 ```
 
-### **Rollback Verification**
+### **Monitoring**
 ```bash
-# Check active namespace
-kubectl get ingress prod-java-backend1-ingress -n default -o yaml
+# Check deployment health
+./scripts/health-check.sh prod
 
-# Verify pod health
-kubectl get pods -n prod-java-backend1-blue
-kubectl get pods -n prod-java-backend1-green
+# Monitor deployment progress
+./scripts/monitor-deployment.sh ppr
 
-# Test application health
-curl https://api.mydomain.com/actuator/health
+# View real-time logs
+kubectl logs -f deployment/java-backend1 -n prod-java-backend1-blue
 ```
 
-## 🛠️ **Troubleshooting**
+### **Rollback**
+```bash
+# Emergency rollback
+./scripts/emergency-rollback.sh prod
+
+# Helm rollback to previous version
+helm rollback java-backend1 -n default
+
+# Blue-Green traffic switch
+kubectl patch ingress java-backend1-ingress -n default --type='merge' -p='{"metadata":{"labels":{"active-slot":"blue"}}}'
+```
+
+## 🔧 **Troubleshooting**
 
 ### **Common Issues**
+| Issue | Symptoms | Solution |
+|-------|----------|----------|
+| **Pod CrashLoop** | Pods constantly restarting | Check health endpoints, resource limits |
+| **Traffic Not Switching** | Old version still serving | Verify ingress configuration, DNS propagation |
+| **Database Connection** | 500 errors, timeout | Check Key Vault secrets, network policies |
+| **Image Pull Errors** | ImagePullBackOff status | Verify ACR credentials, image tags |
 
-#### **Deployment Stuck in Canary**
-```bash
-# Check canary ingress weight
-kubectl get ingress prod-java-backend1-ingress-canary -n default -o yaml
-
-# Check target namespace pods
-kubectl get pods -n prod-java-backend1-green
-
-# View deployment logs
-kubectl logs deployment/java-backend1 -n prod-java-backend1-green
-```
-
-#### **Health Check Failures**
+### **Debug Commands**
 ```bash
 # Check pod status
-kubectl describe pod <pod-name> -n <namespace>
+kubectl get pods -n prod-java-backend1-blue -o wide
 
-# View application logs
-kubectl logs <pod-name> -n <namespace> --tail=100
+# View pod logs
+kubectl logs deployment/java-backend1 -n prod-java-backend1-blue --tail=100
 
-# Test health endpoint
-kubectl port-forward pod/<pod-name> 8080:8080 -n <namespace>
-curl http://localhost:8080/actuator/health
+# Check ingress configuration
+kubectl get ingress java-backend1-ingress -n default -o yaml
+
+# Test connectivity
+kubectl exec -it deployment/java-backend1 -n prod-java-backend1-blue -- curl localhost:8080/backend1/actuator/health
 ```
 
-#### **Ingress Issues**
-```bash
-# Check ingress status
-kubectl get ingress -n default
-kubectl describe ingress prod-java-backend1-ingress -n default
+## 🤝 **Contributing**
 
-# View nginx ingress logs
-kubectl logs -n ingress-nginx deployment/ingress-nginx-controller
-```
+### **Development Process**
+1. **Fork** the repository
+2. **Create** feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to branch (`git push origin feature/amazing-feature`)
+5. **Open** Pull Request
 
-## 📚 **Additional Resources**
+### **Code Standards**
+- **Java 21** with Spring Boot 3.2+
+- **SonarQube** quality gates (>80% coverage)
+- **Checkmarx** security scanning
+- **Conventional Commits** for clear history
+- **Documentation** for all public APIs
 
-- **[Deployment Guide](./docs/DEPLOYMENT.md)** - Detailed deployment procedures
-- **[Blue-Green Strategy](./docs/BLUE-GREEN.md)** - In-depth Blue-Green explanation
-- **[Runbooks](./docs/RUNBOOKS.md)** - Operational procedures
-- **[Scripts](./scripts/)** - Automation scripts and utilities
+## 📞 **Support**
 
-## 🔗 **Repository Structure**
-```
-├── .github/workflows/deploy.yml    # Caller workflow
-├── helm/                           # Helm charts
-│   ├── templates/                  # K8s templates (Blue-Green ready)
-│   ├── values-dev.yaml            # Development config
-│   ├── values-sqe.yaml            # SQE config  
-│   ├── values-ppr.yaml            # Pre-production config
-│   └── values-prod.yaml           # Production config (Blue-Green)
-├── src/                           # Application source
-├── scripts/                       # Deployment utilities
-├── docs/                          # Documentation
-└── Dockerfile                     # Container definition
-```
+### **Documentation**
+- **[Azure Infrastructure Setup](docs/AZURE-INFRASTRUCTURE-SETUP.md)** - Complete infrastructure guide
+- **[Spring Boot Configuration](docs/SPRING-BOOT-CONFIGURATION.md)** - Application configuration
+- **[Rollback Procedures](docs/ROLLBACK-PROCEDURES.md)** - Emergency procedures
+- **[Helm Integration Guide](docs/HELM-INTEGRATION-GUIDE.md)** - Helm chart management
+- **[Deployment Guide](DEPLOYMENT.md)** - Deployment workflows
+- **[Quick Reference](docs/QUICK-REFERENCE.md)** - Command reference
 
-## 🎯 **Getting Started**
+### **Getting Help**
+- **🎫 Issues**: [GitHub Issues](https://github.com/your-org/java-backend1/issues)
+- **💬 Discussions**: [GitHub Discussions](https://github.com/your-org/java-backend1/discussions)
+- **📧 Email**: devops@yourcompany.com
+- **📱 Slack**: #java-backend1-support
 
-1. **Clone the repository**
-2. **Set up local development** with `mvn spring-boot:run`
-3. **Make changes** and push to `develop` for automatic dev deployment
-4. **Create release branch** for pre-production testing
-5. **Tag for production** deployment with manual approval
-6. **Monitor deployment** through GitHub Actions and Azure Portal
+## 📄 **License**
 
-Your application is now ready for **enterprise-grade Blue-Green deployments** with **zero-downtime** and **instant rollback** capabilities! 🚀
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+**🎯 Ready for Production!** This implementation provides enterprise-grade Blue-Green deployment with zero-downtime releases, comprehensive monitoring, and robust rollback capabilities.
