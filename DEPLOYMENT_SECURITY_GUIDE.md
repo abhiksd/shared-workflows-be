@@ -1,327 +1,372 @@
 # Deployment Security Guide
 
-This document explains the comprehensive security mechanisms implemented to protect production environments while maintaining deployment flexibility.
+This guide explains the multi-layered security approach for protecting production deployments while maintaining development flexibility.
 
-## 🛡️ Security Overview
+## Overview
 
-The deployment system implements multi-layered protection for production environments:
+The deployment system implements three levels of protection:
+- **Standard Protection**: DEV and SQE environments (minimal restrictions)
+- **Enhanced Protection**: PPR environment (authorized users only for overrides)
+- **Maximum Protection**: PROD environment (authorized users + emergency flag for overrides)
 
-- **Lower Environments (DEV, SQE)**: Standard validation with branch-based rules
-- **Protected Environments (PPR, PROD)**: Enhanced protection with role-based access control
-- **Emergency Deployments**: Strict authorization requirements with full audit trail
+## Authorized Users Configuration
 
-## 🔒 Protection Levels
+### Where to Configure
 
-### Level 1: Development & SQE (Standard Protection)
-- **Environments**: `dev`, `sqe`
-- **Protection**: Branch validation only
-- **Manual Override**: Available to all users
-- **Use Case**: Development and testing workflows
+The authorized users list is configured in the shared workflow file:
+**File**: `.github/workflows/shared-deploy.yml` (in `no-keyvault-shared-github-actions` branch)
 
-### Level 2: Pre-Production (Enhanced Protection)
-- **Environment**: `ppr`
-- **Protection**: Role-based access control for manual overrides
-- **Authorization**: Requires authorized user for branch validation override
-- **Use Case**: Final validation before production
+**Location**: Line ~75 in the `validate-environment` job, within the shell script section:
 
-### Level 3: Production (Maximum Protection)
-- **Environment**: `prod`
-- **Protection**: Role-based access + emergency flag requirement
-- **Authorization**: Requires authorized user + emergency deployment flag
-- **Use Case**: Live production deployments with maximum security
+```yaml
+- name: Validate deployment environment and set cluster details
+  shell: bash
+  run: |
+    # ... other code ...
+    
+    # Authorized users list (configurable)
+    AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
+    
+    # ... rest of the script ...
+```
 
-## 👥 Authorization System
+### How to Modify Authorized Users
 
-### Authorized Users Configuration
+#### 1. Edit the Shared Workflow
 
-The system maintains a configurable list of authorized users for protected environments:
+To add or remove authorized users, modify the `AUTHORIZED_USERS` variable:
 
 ```bash
-# In shared workflow - easily configurable
+# Current configuration
 AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
+
+# Example: Add new users
+AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer,senior-dev,qa-lead"
+
+# Example: Remove a user
+AUTHORIZED_USERS="admin,devops-lead,release-manager"
+
+# Example: Single administrator
+AUTHORIZED_USERS="admin"
 ```
 
-### User Authorization Levels
+#### 2. User Identification Format
 
-| User Role | DEV/SQE | PPR Override | PROD Override | Emergency PROD |
-|-----------|---------|--------------|---------------|----------------|
-| **Developer** | ✅ | ❌ | ❌ | ❌ |
-| **DevOps Lead** | ✅ | ✅ | ✅ | ✅ |
-| **Release Manager** | ✅ | ✅ | ✅ | ✅ |
-| **Platform Engineer** | ✅ | ✅ | ✅ | ✅ |
-| **Admin** | ✅ | ✅ | ✅ | ✅ |
+Users are identified by their **GitHub username** (not display name or email).
 
-## 🚨 Protection Scenarios
+**Examples:**
+```bash
+# Correct: GitHub usernames
+AUTHORIZED_USERS="john.doe,jane.smith,mike.wilson"
 
-### Scenario 1: Developer Attempts Unauthorized PPR Deployment
+# Incorrect: Email addresses
+AUTHORIZED_USERS="john@company.com,jane@company.com"  # ❌ Won't work
+
+# Incorrect: Display names
+AUTHORIZED_USERS="John Doe,Jane Smith"  # ❌ Won't work
+```
+
+#### 3. Configuration Examples
+
+**Small Team Configuration:**
+```bash
+AUTHORIZED_USERS="tech-lead,devops-admin"
+```
+
+**Medium Team Configuration:**
+```bash
+AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer,senior-dev-1,senior-dev-2"
+```
+
+**Enterprise Configuration:**
+```bash
+AUTHORIZED_USERS="platform-admin,devops-manager,release-director,infrastructure-lead,security-engineer,production-operator"
+```
+
+**Emergency-Only Configuration:**
+```bash
+AUTHORIZED_USERS="emergency-admin"
+```
+
+### Best Practices for User Management
+
+#### 1. Role-Based Authorization
+
+Organize users by responsibility:
 
 ```bash
-# Developer tries to deploy to PPR with override
-gh workflow run deploy.yml \
-  -f environment=ppr \
-  -f override_branch_validation=true
+# Production Operations Team
+AUTHORIZED_USERS="prod-ops-lead,infrastructure-manager,platform-engineer,devops-senior"
 
-# Result: ❌ BLOCKED
-# Message: "User 'developer-username' is not authorized for PPR deployments"
+# Release Management Team  
+AUTHORIZED_USERS="release-manager,deployment-lead,qa-director,product-owner"
+
+# Emergency Response Team
+AUTHORIZED_USERS="on-call-engineer,site-reliability-lead,platform-architect"
 ```
 
-### Scenario 2: Developer Attempts Unauthorized PROD Deployment
+#### 2. Principle of Least Privilege
 
+- **Minimum Required**: Only include users who regularly need to perform protected deployments
+- **Regular Review**: Audit the list quarterly to remove inactive users
+- **Emergency Access**: Maintain at least 2-3 authorized users for emergency scenarios
+
+#### 3. User Lifecycle Management
+
+**Adding New Users:**
+1. Verify GitHub username spelling
+2. Test with a non-production override first
+3. Document the addition in team records
+
+**Removing Users:**
+1. Remove from `AUTHORIZED_USERS` list
+2. Verify removal with a test deployment
+3. Update team documentation
+
+#### 4. Security Considerations
+
+**GitHub Username Verification:**
 ```bash
-# Developer tries to deploy to PROD with override
-gh workflow run deploy.yml \
-  -f environment=prod \
-  -f override_branch_validation=true
+# To verify a GitHub username exists:
+curl -s https://api.github.com/users/USERNAME
 
-# Result: ❌ BLOCKED
-# Message: "User 'developer-username' is not authorized for PROD deployments"
-```
-
-### Scenario 3: Authorized User PPR Deployment
-
-```bash
-# DevOps lead deploys to PPR with override
-gh workflow run deploy.yml \
-  -f environment=ppr \
-  -f override_branch_validation=true \
-  -f deploy_notes="Testing hotfix before production"
-
-# Result: ✅ APPROVED
-# Message: "Pre-Prod deployment approved: authorized manual override"
-```
-
-### Scenario 4: Authorized User Emergency PROD Deployment
-
-```bash
-# DevOps lead attempts PROD deployment without emergency flag
-gh workflow run deploy.yml \
-  -f environment=prod \
-  -f override_branch_validation=true
-
-# Result: ❌ BLOCKED
-# Message: "Emergency deployment flag required for PROD manual override"
-
-# DevOps lead with proper emergency deployment
-gh workflow run deploy.yml \
-  -f environment=prod \
-  -f override_branch_validation=true \
-  -f emergency_deployment=true \
-  -f deploy_notes="Critical security patch"
-
-# Result: ✅ APPROVED
-# Message: "Production deployment approved: EMERGENCY authorized manual override"
-# Audit: "🚨 EMERGENCY DEPLOYMENT: User=devops-lead, Notes='Critical security patch'"
-```
-
-## 🔐 Manual Deployment Security Matrix
-
-### Workflow Dispatch Parameters
-
-| Parameter | DEV/SQE | PPR | PROD | Security Impact |
-|-----------|---------|-----|------|----------------|
-| `environment` | Any user | Any user | Any user | Selection only |
-| `override_branch_validation` | Any user | **Authorized only** | **Authorized only** | Branch bypass |
-| `emergency_deployment` | N/A | N/A | **Required** | Emergency flag |
-| `custom_image_tag` | Any user | Authorized | Authorized | Version control |
-| `deploy_notes` | Any user | Recommended | **Required** | Audit trail |
-
-### Protection Validation Flow
-
-```mermaid
-graph TD
-    A[Manual Deployment Request] --> B{Environment?}
-    B -->|DEV/SQE| C[Standard Validation]
-    B -->|PPR| D{User Authorized?}
-    B -->|PROD| E{User Authorized?}
-    
-    C --> F[Deploy Allowed]
-    
-    D -->|No| G[Deploy Blocked]
-    D -->|Yes| H{Override Requested?}
-    H -->|No| F
-    H -->|Yes| I[Deploy Allowed with Audit]
-    
-    E -->|No| G
-    E -->|Yes| J{Emergency Flag Set?}
-    J -->|No| K[Deploy Blocked - Emergency Required]
-    J -->|Yes| L[Deploy Allowed with Emergency Audit]
-```
-
-## 🔍 Audit Trail
-
-### Security Event Logging
-
-The system logs all security-relevant events:
-
-#### User Authorization Checks
-```bash
-"🔒 Validating protected environment deployment: PPR"
-"✅ Protected deployment authorized for user 'devops-lead'"
-"❌ User 'developer' is not authorized for PPR deployments"
-```
-
-#### Emergency Deployment Tracking
-```bash
-"🚨 EMERGENCY DEPLOYMENT: User=devops-lead, Notes='Critical security patch'"
-"✅ Production deployment approved: EMERGENCY authorized manual override"
-```
-
-#### Branch Override Events
-```bash
-"✅ Pre-Prod deployment approved: authorized manual override from branch feature/hotfix"
-"❌ Production deployment blocked: must be tag or authorized emergency manual override"
-```
-
-## ⚙️ Configuration Management
-
-### Adding Authorized Users
-
-To add a new authorized user for protected environments:
-
-```bash
-# In .github/workflows/shared-deploy.yml
-AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer,new-user"
-```
-
-### Customizing Protection Levels
-
-The protection system can be customized per organization:
-
-```bash
-# Example: Different authorization for different environments
-validate_protected_deployment() {
-  local env="$1"
-  local requires_emergency="$2"
-  
-  case "$env" in
-    "PPR")
-      # PPR-specific authorization logic
-      ;;
-    "PROD")
-      # PROD-specific authorization logic
-      ;;
-  esac
+# Example response for valid user:
+{
+  "login": "octocat",
+  "id": 1,
+  "type": "User"
 }
 ```
 
-## 🚀 Best Practices
+**Case Sensitivity:**
+- GitHub usernames are case-insensitive
+- Configuration is case-sensitive in the workflow
+- Use exact casing from GitHub profile
 
-### For Developers
-1. **Use automatic deployment** for normal workflows (branch-based)
-2. **Request authorized users** for manual overrides to protected environments
-3. **Document deployment reasons** in deploy_notes for audit purposes
-4. **Never attempt** unauthorized production deployments
+### Configuration Testing
 
-### For DevOps/Release Managers
-1. **Verify deployment necessity** before using overrides
-2. **Use emergency flag judiciously** - only for actual emergencies
-3. **Provide detailed notes** for all manual deployments
-4. **Monitor audit logs** for unauthorized attempts
-5. **Review and update** authorized user list regularly
+#### 1. Test Authorized User Access
 
-### For Platform Engineers
-1. **Regularly review** authorization configurations
-2. **Monitor security events** in deployment logs
-3. **Update protection mechanisms** based on organizational needs
-4. **Conduct security reviews** of deployment practices
-
-## 🛠️ Emergency Procedures
-
-### Emergency Production Deployment Process
-
-1. **Assess Situation**: Confirm genuine emergency requiring immediate deployment
-2. **Verify Authorization**: Ensure user is in authorized list
-3. **Execute Deployment**:
-   ```bash
-   gh workflow run deploy.yml \
-     -f environment=prod \
-     -f override_branch_validation=true \
-     -f emergency_deployment=true \
-     -f custom_image_tag=emergency-hotfix-v1.2.1 \
-     -f deploy_notes="[EMERGENCY] Critical security vulnerability fix - CVE-2024-XXXX"
-   ```
-4. **Post-Deployment**: Document incident and review process
-
-### Emergency Response Checklist
-
-- [ ] Emergency situation confirmed
-- [ ] Authorized user performing deployment
-- [ ] Emergency flag set to true
-- [ ] Detailed deployment notes provided
-- [ ] Custom image tag specified (if needed)
-- [ ] Post-deployment validation planned
-- [ ] Incident documentation prepared
-
-## 🔧 Troubleshooting
-
-### Common Authorization Issues
-
-#### "User not authorized" Error
+**Scenario**: Test PPR manual override
 ```bash
-# Check authorized users list
-grep "AUTHORIZED_USERS" .github/workflows/shared-deploy.yml
-
-# Add user to authorized list or request deployment from authorized user
+# Manual deployment as authorized user
+gh workflow run deploy.yml \
+  --ref any-branch \
+  -f environment=ppr \
+  -f override_branch_validation=true \
+  -f deploy_notes="Testing authorized access"
 ```
 
-#### "Emergency deployment flag required" Error
+**Expected Result**: ✅ Deployment proceeds with authorization message
+
+#### 2. Test Unauthorized User Access
+
+**Scenario**: Non-authorized user attempts PPR override
 ```bash
-# For PROD manual override, emergency flag is required
+# Manual deployment as non-authorized user
 gh workflow run deploy.yml \
+  --ref any-branch \
+  -f environment=ppr \
+  -f override_branch_validation=true
+```
+
+**Expected Result**: ❌ Deployment blocked with authorization error
+
+#### 3. Test PROD Emergency Access
+
+**Scenario**: Test emergency PROD deployment
+```bash
+# Emergency PROD deployment
+gh workflow run deploy.yml \
+  --ref any-branch \
   -f environment=prod \
   -f override_branch_validation=true \
-  -f emergency_deployment=true  # <- Required for PROD override
+  -f emergency_deployment=true \
+  -f deploy_notes="Critical security patch deployment"
 ```
 
-#### Deployment Blocked Despite Authorization
+**Expected Result**: ✅ Deployment proceeds with emergency warning logs
+
+### Common Configuration Errors
+
+#### 1. Syntax Errors
+
+**Incorrect Formatting:**
 ```bash
-# Check all required parameters for PROD deployment:
-# 1. User must be authorized
-# 2. Emergency flag must be true
-# 3. Deploy notes should be provided
-# 4. Override validation must be explicitly set
+# ❌ Spaces around commas
+AUTHORIZED_USERS="admin, devops-lead, release-manager"
+
+# ❌ Extra quotes
+AUTHORIZED_USERS="'admin','devops-lead','release-manager'"
+
+# ❌ Missing quotes
+AUTHORIZED_USERS=admin,devops-lead,release-manager
+
+# ✅ Correct format
+AUTHORIZED_USERS="admin,devops-lead,release-manager"
 ```
 
-## 📊 Security Metrics
+#### 2. Username Errors
 
-### Deployment Security Dashboard
+**Common Mistakes:**
+```bash
+# ❌ Using email instead of username
+AUTHORIZED_USERS="john@company.com"
 
-Track these metrics for security monitoring:
+# ❌ Using display name
+AUTHORIZED_USERS="John Doe"
 
-- **Authorized Deployments**: Count of successful authorized deployments
-- **Blocked Attempts**: Count of unauthorized deployment attempts
-- **Emergency Deployments**: Count of emergency PROD deployments
-- **User Activity**: Deployment activity by user
-- **Environment Access**: Access patterns per environment
+# ❌ Incorrect casing (if user is actually 'JohnDoe')
+AUTHORIZED_USERS="johndoe"
 
-### Sample Security Report
-
-```
-Deployment Security Report (Last 30 Days)
-==========================================
-Total Deployment Attempts: 150
-- DEV: 80 (100% success)
-- SQE: 45 (100% success)
-- PPR: 20 (95% success, 1 blocked unauthorized)
-- PROD: 5 (100% success, 3 emergency)
-
-Blocked Attempts: 1
-- PPR unauthorized override: developer-user-123
-
-Emergency Deployments: 3
-- All properly authorized and documented
-- Average resolution time: 15 minutes
+# ✅ Correct GitHub username
+AUTHORIZED_USERS="JohnDoe"
 ```
 
-## ✅ Summary
+### Audit and Monitoring
 
-The deployment security system provides:
+#### 1. Deployment Logs
 
-- **🛡️ Multi-layered Protection**: Different security levels per environment
-- **👥 Role-based Access Control**: Configurable authorized user management
-- **🚨 Emergency Procedures**: Controlled emergency deployment capability
-- **📝 Complete Audit Trail**: Full logging of all security events
-- **⚙️ Flexible Configuration**: Adaptable to organizational needs
-- **🔒 Production Safety**: Maximum protection for production environments
+All authorization attempts are logged:
 
-This ensures that while developers have flexibility for normal deployments, production environments remain protected against accidental or unauthorized deployments.
+```
+✅ User 'admin' authorized for PPR manual override
+❌ User 'unauthorized-dev' blocked from PPR manual override
+🚨 EMERGENCY DEPLOYMENT: User=admin, Notes='Critical patch'
+```
+
+#### 2. Regular Audits
+
+**Monthly Review Checklist:**
+- [ ] Review authorized users list
+- [ ] Verify all users are still active team members
+- [ ] Check for any unauthorized deployment attempts
+- [ ] Update user list based on team changes
+
+#### 3. Security Monitoring
+
+**Key Metrics to Track:**
+- Number of manual overrides per month
+- Emergency deployments frequency
+- Blocked deployment attempts
+- User authorization failures
+
+### Advanced Configuration Options
+
+#### 1. Environment-Specific Authorization
+
+For more granular control, you could extend the configuration:
+
+```bash
+# Future enhancement: Environment-specific users
+PPR_AUTHORIZED_USERS="devops-lead,release-manager"
+PROD_AUTHORIZED_USERS="admin,platform-engineer"
+```
+
+#### 2. Time-Based Restrictions
+
+```bash
+# Future enhancement: Time-based access
+BUSINESS_HOURS_ONLY="true"
+WEEKEND_DEPLOYMENTS="emergency-only"
+```
+
+#### 3. Integration with External Systems
+
+```bash
+# Future enhancement: External authorization
+AUTH_SYSTEM="okta"
+AUTH_GROUP="production-deployers"
+```
+
+## Protection Levels
+
+### Standard Protection (DEV, SQE)
+- **Auto-deployment**: Based on branch triggers
+- **Manual Override**: No restrictions
+- **User Requirements**: Any team member
+- **Audit Level**: Basic logging
+
+### Enhanced Protection (PPR)
+- **Auto-deployment**: `release/**` branches only
+- **Manual Override**: Authorized users only
+- **User Requirements**: Must be in `AUTHORIZED_USERS` list
+- **Audit Level**: Enhanced logging with user identification
+
+### Maximum Protection (PROD)
+- **Auto-deployment**: Tagged releases only
+- **Manual Override**: Authorized users + emergency flag
+- **User Requirements**: Must be in `AUTHORIZED_USERS` list AND set `emergency_deployment=true`
+- **Audit Level**: Maximum logging with emergency alerts
+
+## Emergency Deployment Procedures
+
+### When to Use Emergency Deployment
+
+**Valid Emergency Scenarios:**
+- Critical security vulnerabilities
+- Production outages requiring immediate fixes
+- Data corruption issues
+- Compliance-related urgent updates
+
+**Process:**
+1. Assess if it's truly an emergency
+2. Ensure you're an authorized user
+3. Prepare detailed deployment notes
+4. Set `emergency_deployment=true`
+5. Monitor deployment closely
+6. Document post-deployment actions
+
+### Emergency Deployment Example
+
+```yaml
+# Manual workflow dispatch for emergency PROD deployment
+environment: prod
+override_branch_validation: true
+emergency_deployment: true
+custom_image_tag: "hotfix-security-patch-v1.2.3"
+deploy_notes: "EMERGENCY: Critical security patch for CVE-2024-XXXX. Approved by security team. Rollback plan: revert to v1.2.2 tag."
+```
+
+## Best Practices
+
+### 1. Access Management
+- Limit authorized users to essential personnel only
+- Regular review and cleanup of user list
+- Document reasons for each authorized user
+
+### 2. Emergency Procedures
+- Clear escalation path for emergencies
+- Pre-approved emergency contact list
+- Post-deployment review process
+
+### 3. Audit and Compliance
+- Monitor all deployment activities
+- Maintain deployment logs for compliance
+- Regular security reviews of access patterns
+
+### 4. Documentation
+- Keep authorization list updated
+- Document emergency procedures
+- Train team on security protocols
+
+## Troubleshooting
+
+### Common Issues
+
+**"User not authorized" Error:**
+1. Verify GitHub username spelling
+2. Check if user is in `AUTHORIZED_USERS` list
+3. Ensure correct casing of username
+
+**Emergency Deployment Blocked:**
+1. Verify user is authorized
+2. Ensure `emergency_deployment=true` is set
+3. Check if deployment notes are provided
+
+**Configuration Not Taking Effect:**
+1. Verify changes are committed to correct branch
+2. Check workflow file syntax
+3. Ensure latest shared workflow version is being used
+
+For additional support, consult the team's deployment documentation or contact the platform engineering team.
