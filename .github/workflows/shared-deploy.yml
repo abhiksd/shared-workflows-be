@@ -353,7 +353,7 @@ jobs:
 
       - name: Download Maven build artifacts
         if: inputs.application_type == 'java-springboot'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ${{ needs.maven-build.outputs.jar_artifact }}
           path: ${{ inputs.build_context }}
@@ -406,10 +406,11 @@ jobs:
           echo "========================================================"
           
           APP_NAME="${{ inputs.application_name }}"
+          TARGET_ENV="${{ needs.validate-environment.outputs.target_environment }}"
           
           # Check which namespace is currently active
-          BLUE_NS="${{ inputs.environment }}-${APP_NAME}-blue"
-          GREEN_NS="${{ inputs.environment }}-${APP_NAME}-green"
+          BLUE_NS="${TARGET_ENV}-${APP_NAME}-blue"
+          GREEN_NS="${TARGET_ENV}-${APP_NAME}-green"
           
           echo "📋 Checking namespace status:"
           echo "   Blue namespace: $BLUE_NS"
@@ -421,9 +422,9 @@ jobs:
           
           # Check current active slot by looking at ingress or service configuration
           CURRENT_ACTIVE=""
-          if kubectl get ingress prod-${APP_NAME}-ingress -n default >/dev/null 2>&1; then
+          if kubectl get ingress ${TARGET_ENV}-${APP_NAME}-ingress -n default >/dev/null 2>&1; then
             # Check ingress backend namespace
-            INGRESS_BACKEND=$(kubectl get ingress prod-${APP_NAME}-ingress -n default -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.namespace}' 2>/dev/null || echo "")
+            INGRESS_BACKEND=$(kubectl get ingress ${TARGET_ENV}-${APP_NAME}-ingress -n default -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.namespace}' 2>/dev/null || echo "")
             if [[ "$INGRESS_BACKEND" == "$BLUE_NS" ]]; then
               CURRENT_ACTIVE="blue"
             elif [[ "$INGRESS_BACKEND" == "$GREEN_NS" ]]; then
@@ -504,21 +505,57 @@ jobs:
           echo "👥 Awaiting manual approval from authorized personnel..."
           echo "⏳ This deployment will proceed only after manual approval."
 
-  deploy:
+  # Non-production deployment job
+  deploy-non-prod:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy, production-approval]
-    
-    # Deploy to non-prod environments directly, or to prod after approval
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
     if: |
       needs.validate-environment.outputs.should_deploy == 'true' && 
       needs.setup.outputs.should_deploy == 'true' && 
       needs.sonar-scan.outputs.scan_status == 'PASSED' && 
       needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
-      !failure() && !cancelled() &&
-      (
-        needs.validate-environment.outputs.target_environment != 'prod' ||
-        (needs.validate-environment.outputs.target_environment == 'prod' && needs.production-approval.result == 'success')
-      )
+      needs.validate-environment.outputs.target_environment != 'prod' &&
+      !failure() && !cancelled()
+
+    environment: 
+      name: ${{ needs.validate-environment.outputs.target_environment }}
+      url: ${{ format('https://your-{0}-app-url.com', needs.validate-environment.outputs.target_environment) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to AKS (Non-Production)
+        uses: ./.github/actions/helm-deploy
+        with:
+          environment: ${{ needs.validate-environment.outputs.target_environment }}
+          application_name: ${{ inputs.application_name }}
+          application_type: ${{ inputs.application_type }}
+          helm_chart_path: ${{ inputs.helm_chart_path }}
+          image_tag: ${{ needs.setup.outputs.image_tag }}
+          helm_version: ${{ needs.setup.outputs.helm_version }}
+          registry: ${{ env.REGISTRY }}
+          aks_cluster_name: ${{ needs.validate-environment.outputs.aks_cluster_name_1 }}
+          aks_resource_group: ${{ needs.validate-environment.outputs.aks_resource_group_1 }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          # Blue-Green deployment disabled for non-prod
+          blue_green_enabled: 'false'
+          deployment_strategy: 'rolling'
+
+  # Production deployment job with Blue-Green strategy
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy, production-approval]
+    if: |
+      needs.validate-environment.outputs.should_deploy == 'true' && 
+      needs.setup.outputs.should_deploy == 'true' && 
+      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
+      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      needs.validate-environment.outputs.target_environment == 'prod' &&
+      needs.production-approval.result == 'success' &&
+      !failure() && !cancelled()
 
     environment: 
       name: ${{ needs.validate-environment.outputs.target_environment }}
