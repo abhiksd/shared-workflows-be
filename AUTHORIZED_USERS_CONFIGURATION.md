@@ -178,9 +178,40 @@ AUTHORIZED_USERS="primary-admin,backup-admin,on-call-engineer"
 4. **Testing**: Test configuration changes with non-production overrides first
 5. **Emergency Contacts**: Maintain at least 2-3 authorized users for emergencies
 
+## GitHub Enterprise Integration
+
+For enterprise environments using GitHub teams and groups, see the comprehensive [GitHub Enterprise Configuration Guide](GITHUB_ENTERPRISE_CONFIGURATION.md) which covers:
+
+- **Teams and Groups Setup**: Creating and managing GitHub teams
+- **SAML/SSO Integration**: Identity provider configuration
+- **Environment Protection**: Repository environment security rules
+- **Branch Protection**: Advanced branch protection configurations
+- **API Integration**: Team membership validation via GitHub API
+- **Audit and Compliance**: Enterprise-grade logging and reporting
+
+### Quick Team-Based Configuration
+
+**Option 1: Individual Users (Current)**
+```bash
+AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
+```
+
+**Option 2: Team-Based (Enterprise)**
+```bash
+AUTHORIZED_TEAMS="devops-team,release-team,platform-team"
+AUTHORIZED_USERS="admin,emergency-contact-1"
+```
+
+**Option 3: Mixed Approach (Recommended)**
+```bash
+AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
+AUTHORIZED_TEAMS="devops-team,emergency-team"
+```
+
 ## Support
 
 For additional help:
 - Review the full [Deployment Security Guide](DEPLOYMENT_SECURITY_GUIDE.md)
+- For GitHub Enterprise: See [GitHub Enterprise Configuration Guide](GITHUB_ENTERPRISE_CONFIGURATION.md)
 - Contact the platform engineering team
 - Check deployment logs for specific error messages
