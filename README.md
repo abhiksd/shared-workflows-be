@@ -185,10 +185,10 @@ This application uses Spring Boot profiles for environment-specific configuratio
 The deployment workflow provides automatic deployment based on environment-specific branches/tags:
 - **Dev**: Automatic deployment from `dev` branch (also supports `develop` for legacy)
 - **SQE**: Automatic deployment from `sqe` branch  
-- **PPR**: Automatic deployment from `ppr` branch (also supports `release/*` for legacy)
-- **Production**: Automatic deployment from tags (after PPR validation)
+- **PPR**: Automatic deployment from `release/**` branches (also supports `ppr` branch)
+- **Production**: Automatic deployment from **tags** (preserves existing tagging logic)
 
-**Branch-Environment Mapping**: Each environment has its own dedicated branch with the same name, making it easy to add new environments in the future.
+**Branch-Environment Mapping**: Dev and SQE environments use dedicated branches matching their names. PPR uses `release/**` pattern and production uses tags, maintaining the original deployment strategy.
 
 ### Required Deployment Secrets
 The deployment workflow requires these secrets:

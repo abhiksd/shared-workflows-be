@@ -58,6 +58,8 @@ java -jar target/java-backend1-*.jar
 
 ### Development Profile (`dev`)
 **Purpose**: Development environment with external services
+**Branch**: `dev` (also supports `develop` for legacy)
+**Namespace**: `dev`
 
 **Features**:
 - PostgreSQL database connection
@@ -74,6 +76,8 @@ java -jar target/java-backend1-*.jar
 
 ### SQE Profile (`sqe`)
 **Purpose**: System Quality Engineering - production-like testing environment
+**Branch**: `sqe`
+**Namespace**: `sqe`
 
 **Features**:
 - Production database setup with connection pooling
@@ -85,6 +89,8 @@ java -jar target/java-backend1-*.jar
 
 ### PPR Profile (`ppr`)
 **Purpose**: Pre-Production - final validation before production
+**Branch**: `release/**` (also supports `ppr` branch)
+**Namespace**: `ppr`
 
 **Features**:
 - Production-identical configuration
@@ -96,6 +102,8 @@ java -jar target/java-backend1-*.jar
 
 ### Production Profile (`production`)
 **Purpose**: Optimized for performance and security
+**Branch**: **Tags** (preserves existing tagging logic)
+**Namespace**: `prod`
 
 **Features**:
 - Minimal logging (WARN level)

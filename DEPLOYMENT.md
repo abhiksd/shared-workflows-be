@@ -77,28 +77,28 @@ jobs:
 ## 🌍 **Environment-Specific Deployments**
 
 ### Development Environment
-- **Branch**: `develop`, `feature/**`
+- **Branch**: `dev` (also supports `develop`)
 - **URL**: `https://dev.mydomain.com/backend1`
 - **Namespace**: `dev`
-- **Auto-deploy**: ✅ On push to develop
+- **Auto-deploy**: ✅ On push to dev branch
 
 ### SQE Environment  
-- **Branch**: `main`
+- **Branch**: `sqe`
 - **URL**: `https://sqe.mydomain.com/backend1`
 - **Namespace**: `sqe`
-- **Auto-deploy**: ✅ On push to main
+- **Auto-deploy**: ✅ On push to sqe branch
 
 ### Pre-Production Environment
-- **Branch**: `release/**`
+- **Branch**: `release/**` (also supports `ppr` branch)
 - **URL**: `https://ppr.mydomain.com/backend1`
 - **Namespace**: `ppr`
-- **Auto-deploy**: ✅ On push to release branches
+- **Auto-deploy**: ✅ On push to release/** branches
 
 ### Production Environment
-- **Branch**: Tags
+- **Branch**: **Tags** (preserves existing tagging logic)
 - **URL**: `https://production.mydomain.com/backend1`
-- **Namespace**: `production`
-- **Auto-deploy**: ✅ On tag creation (after PPR validation)
+- **Namespace**: `prod`
+- **Auto-deploy**: ✅ On tag creation (with approval gate)
 
 ## 📊 **Monitoring & Health Checks**
 
