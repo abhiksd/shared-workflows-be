@@ -35,11 +35,27 @@ on:
           - sqe
           - ppr
           - prod
+        default: 'dev'
       force_deploy:
         description: 'Force deployment even if no changes'
         required: false
         type: boolean
         default: false
+      override_branch_validation:
+        description: 'Override branch validation (allows deployment from any branch)'
+        required: false
+        type: boolean
+        default: false
+      custom_image_tag:
+        description: 'Custom image tag (optional - uses auto-generated if empty)'
+        required: false
+        type: string
+        default: ''
+      deploy_notes:
+        description: 'Deployment notes/reason (for audit trail)'
+        required: false
+        type: string
+        default: 'Manual deployment via workflow dispatch'
 
 jobs:
   # Deploy Java Backend 1 - User Management Service
@@ -53,4 +69,7 @@ jobs:
       dockerfile_path: ./Dockerfile
       helm_chart_path: ./helm
       force_deploy: ${{ github.event.inputs.force_deploy == 'true' }}
+      override_branch_validation: ${{ github.event.inputs.override_branch_validation == 'true' }}
+      custom_image_tag: ${{ github.event.inputs.custom_image_tag }}
+      deploy_notes: ${{ github.event.inputs.deploy_notes }}
     secrets: inherit
