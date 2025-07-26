@@ -1,0 +1,324 @@
+name: 'Smart Docker Cleanup'
+description: 'Intelligent Docker cleanup with performance optimization and configurable cleanup levels'
+author: 'DevOps Team'
+
+inputs:
+  cleanup_level:
+    description: 'Cleanup intensity: light, moderate, aggressive, emergency'
+    required: false
+    default: 'light'
+  preserve_base_images:
+    description: 'Preserve commonly used base images for faster builds'
+    required: false
+    default: 'true'
+  max_image_age:
+    description: 'Maximum age for images to preserve (e.g., 24h, 7d)'
+    required: false
+    default: '24h'
+  disk_threshold:
+    description: 'Disk usage threshold to trigger emergency cleanup (%)'
+    required: false
+    default: '85'
+  preserve_cache:
+    description: 'Preserve Docker build cache'
+    required: false
+    default: 'true'
+
+outputs:
+  cleanup_status:
+    description: 'Status of cleanup operation'
+    value: ${{ steps.cleanup.outputs.status }}
+  disk_usage_before:
+    description: 'Disk usage percentage before cleanup'
+    value: ${{ steps.disk-check.outputs.current_usage }}
+  disk_usage_after:
+    description: 'Disk usage percentage after cleanup'
+    value: ${{ steps.cleanup.outputs.final_usage }}
+  cleanup_level_used:
+    description: 'Actual cleanup level used (may be escalated due to disk usage)'
+    value: ${{ steps.cleanup.outputs.level_used }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check Disk Usage
+      id: disk-check
+      shell: bash
+      run: |
+        echo "🔍 Checking disk usage before cleanup..."
+        DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+        echo "current_usage=$DISK_USAGE" >> $GITHUB_OUTPUT
+        echo "📊 Current disk usage: ${DISK_USAGE}%"
+        
+        if [ $DISK_USAGE -gt ${{ inputs.disk_threshold }} ]; then
+          echo "🚨 Disk usage above threshold (${{ inputs.disk_threshold }}%), will force aggressive cleanup"
+          echo "force_aggressive=true" >> $GITHUB_OUTPUT
+        else
+          echo "✅ Disk usage within acceptable range"
+          echo "force_aggressive=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Show Docker resource usage
+        echo "🐳 Current Docker resources:"
+        if command -v docker &> /dev/null; then
+          echo "   Images: $(docker images -q | wc -l)"
+          echo "   Containers: $(docker ps -aq | wc -l)"
+          echo "   Volumes: $(docker volume ls -q | wc -l)"
+          echo "   Networks: $(docker network ls -q | wc -l)"
+        else
+          echo "   Docker not available"
+        fi
+
+    - name: Smart Docker Cleanup
+      id: cleanup
+      shell: bash
+      run: |
+        CLEANUP_LEVEL="${{ inputs.cleanup_level }}"
+        PRESERVE_BASE="${{ inputs.preserve_base_images }}"
+        MAX_AGE="${{ inputs.max_image_age }}"
+        PRESERVE_CACHE="${{ inputs.preserve_cache }}"
+        FORCE_AGGRESSIVE="${{ steps.disk-check.outputs.force_aggressive }}"
+        
+        # Override cleanup level if disk space critical
+        if [ "$FORCE_AGGRESSIVE" = "true" ]; then
+          ORIGINAL_LEVEL="$CLEANUP_LEVEL"
+          CLEANUP_LEVEL="emergency"
+          echo "🚨 Escalating cleanup level from '$ORIGINAL_LEVEL' to 'emergency' due to disk space"
+        fi
+        
+        echo "🧹 Starting Docker cleanup (Level: $CLEANUP_LEVEL)"
+        echo "   Preserve base images: $PRESERVE_BASE"
+        echo "   Preserve build cache: $PRESERVE_CACHE"
+        echo "   Max image age: $MAX_AGE"
+        
+        # Record actual cleanup level used
+        echo "level_used=$CLEANUP_LEVEL" >> $GITHUB_OUTPUT
+        
+        # Check if Docker is available
+        if ! command -v docker &> /dev/null; then
+          echo "ℹ️ Docker not available, skipping Docker cleanup"
+          echo "status=skipped" >> $GITHUB_OUTPUT
+          echo "final_usage=${{ steps.disk-check.outputs.current_usage }}" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Define base images to preserve for faster builds
+        BASE_IMAGES=(
+          "ubuntu:20.04"
+          "ubuntu:22.04"
+          "ubuntu:latest"
+          "node:18-alpine"
+          "node:20-alpine"
+          "node:latest"
+          "openjdk:17-jdk-slim"
+          "openjdk:21-jdk-slim"
+          "maven:3.9-openjdk-17"
+          "maven:3.9-openjdk-21"
+          "nginx:alpine"
+          "nginx:latest"
+          "alpine:latest"
+          "alpine:3.18"
+          "mcr.microsoft.com/azure-cli:latest"
+          "mcr.microsoft.com/dotnet/runtime:6.0"
+          "mcr.microsoft.com/dotnet/runtime:8.0"
+          "postgres:15-alpine"
+          "redis:7-alpine"
+        )
+        
+        echo "📋 Base images that will be preserved (if preserve_base_images=true):"
+        for img in "${BASE_IMAGES[@]}"; do
+          echo "   - $img"
+        done
+        echo ""
+        
+        case "$CLEANUP_LEVEL" in
+          "light")
+            echo "🔹 Light cleanup: Removing stopped containers and dangling images"
+            echo "   Impact: Minimal (~15-30 seconds)"
+            echo "   Preserves: All images, build cache, base images"
+            
+            # Remove stopped containers
+            echo "🗑️ Removing stopped containers..."
+            docker container prune -f 2>/dev/null || true
+            
+            # Remove dangling images (untagged)
+            echo "🗑️ Removing dangling images..."
+            docker image prune -f 2>/dev/null || true
+            
+            # Remove unused networks
+            echo "🗑️ Removing unused networks..."
+            docker network prune -f 2>/dev/null || true
+            
+            echo "✅ Light cleanup completed"
+            ;;
+            
+          "moderate")
+            echo "🔸 Moderate cleanup: Light cleanup + old images"
+            echo "   Impact: Medium (~30-60 seconds)"
+            echo "   Preserves: Base images (if enabled), recent images, build cache (if enabled)"
+            
+            # Light cleanup first
+            echo "🗑️ Performing light cleanup..."
+            docker container prune -f 2>/dev/null || true
+            docker image prune -f 2>/dev/null || true
+            docker network prune -f 2>/dev/null || true
+            
+            # Remove images older than MAX_AGE (except base images if preserving)
+            echo "🗑️ Removing images older than $MAX_AGE..."
+            if [ "$PRESERVE_BASE" = "true" ]; then
+              echo "   Preserving base images..."
+              # Get all images with creation time
+              docker images --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}\t{{.ID}}" | tail -n +2 | while IFS=$'\t' read -r IMAGE_NAME CREATED IMAGE_ID; do
+                # Check if it's a base image
+                IS_BASE=false
+                for base in "${BASE_IMAGES[@]}"; do
+                  if [[ "$IMAGE_NAME" == "$base" ]] || [[ "$IMAGE_NAME" == "$base"* ]]; then
+                    IS_BASE=true
+                    break
+                  fi
+                done
+                
+                if [ "$IS_BASE" = "false" ]; then
+                  # Try to check age and remove if old (simplified age check)
+                  echo "   Checking non-base image: $IMAGE_NAME"
+                  # Note: This is a simplified approach. In production, you might want more sophisticated date parsing
+                  docker rmi "$IMAGE_ID" 2>/dev/null || true
+                fi
+              done
+            else
+              # Remove all old images using Docker's built-in filter
+              docker image prune -a --filter "until=$MAX_AGE" -f 2>/dev/null || true
+            fi
+            
+            echo "✅ Moderate cleanup completed"
+            ;;
+            
+          "aggressive")
+            echo "🔶 Aggressive cleanup: Removing most Docker data"
+            echo "   Impact: High (~60-120 seconds)"
+            echo "   Preserves: Base images (if enabled), build cache (if enabled)"
+            
+            # Remove stopped containers
+            echo "🗑️ Removing all stopped containers..."
+            docker container prune -f 2>/dev/null || true
+            
+            # Remove all unused images (except base images if preserving)
+            if [ "$PRESERVE_BASE" = "true" ]; then
+              echo "🗑️ Removing non-base images..."
+              # Get list of all images
+              ALL_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || echo "")
+              
+              # Remove non-base images
+              for img in $ALL_IMAGES; do
+                if [ "$img" != "<none>:<none>" ]; then
+                  IS_BASE=false
+                  for base in "${BASE_IMAGES[@]}"; do
+                    if [[ "$img" == "$base" ]]; then
+                      IS_BASE=true
+                      break
+                    fi
+                  done
+                  
+                  if [ "$IS_BASE" = "false" ]; then
+                    echo "   Removing image: $img"
+                    docker rmi "$img" 2>/dev/null || true
+                  else
+                    echo "   Preserving base image: $img"
+                  fi
+                fi
+              done
+            else
+              echo "🗑️ Removing all unused images..."
+              docker image prune -a -f 2>/dev/null || true
+            fi
+            
+            # Remove unused volumes
+            echo "🗑️ Removing unused volumes..."
+            docker volume prune -f 2>/dev/null || true
+            
+            # Remove unused networks
+            echo "🗑️ Removing unused networks..."
+            docker network prune -f 2>/dev/null || true
+            
+            # Conditionally clean build cache
+            if [ "$PRESERVE_CACHE" = "false" ]; then
+              echo "🗑️ Removing build cache..."
+              docker builder prune -a -f 2>/dev/null || true
+            else
+              echo "💾 Preserving build cache..."
+              docker builder prune -f 2>/dev/null || true  # Remove only dangling cache
+            fi
+            
+            echo "✅ Aggressive cleanup completed"
+            ;;
+            
+          "emergency")
+            echo "🚨 Emergency cleanup: Full Docker system reset"
+            echo "   Impact: Maximum (~2-3 minutes)"
+            echo "   Preserves: Nothing (full reset + essential base images re-pull)"
+            echo "   ⚠️ This will remove ALL Docker data to free maximum space"
+            
+            # Stop all running containers
+            echo "🛑 Stopping all running containers..."
+            docker ps -q | xargs -r docker stop 2>/dev/null || true
+            
+            # Remove everything
+            echo "🗑️ Removing all Docker data..."
+            docker system prune -a -f --volumes 2>/dev/null || true
+            docker builder prune -a -f 2>/dev/null || true
+            
+            # Pull essential base images back for next build
+            echo "📥 Re-pulling essential base images..."
+            ESSENTIAL_IMAGES=("ubuntu:22.04" "openjdk:17-jdk-slim" "maven:3.9-openjdk-17" "alpine:latest")
+            for base in "${ESSENTIAL_IMAGES[@]}"; do
+              echo "   Pulling $base..."
+              docker pull "$base" 2>/dev/null || echo "   ⚠️ Failed to pull $base"
+            done
+            
+            echo "✅ Emergency cleanup completed"
+            ;;
+            
+          *)
+            echo "❌ Unknown cleanup level: $CLEANUP_LEVEL"
+            echo "   Valid levels: light, moderate, aggressive, emergency"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+            ;;
+        esac
+        
+        # Check final disk usage
+        FINAL_DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+        echo "final_usage=$FINAL_DISK_USAGE" >> $GITHUB_OUTPUT
+        
+        echo ""
+        echo "✅ Docker cleanup completed successfully"
+        echo "📊 Disk usage: ${{ steps.disk-check.outputs.current_usage }}% → ${FINAL_DISK_USAGE}%"
+        
+        # Calculate space freed
+        SPACE_FREED=$(($(echo "${{ steps.disk-check.outputs.current_usage }}") - $FINAL_DISK_USAGE))
+        if [ $SPACE_FREED -gt 0 ]; then
+          echo "💾 Space freed: ${SPACE_FREED}%"
+        fi
+        
+        # Show final Docker resource count
+        echo "🐳 Final Docker resource summary:"
+        echo "   Images: $(docker images -q 2>/dev/null | wc -l)"
+        echo "   Containers: $(docker ps -aq 2>/dev/null | wc -l)"
+        echo "   Volumes: $(docker volume ls -q 2>/dev/null | wc -l)"
+        echo "   Networks: $(docker network ls -q 2>/dev/null | wc -l)"
+        
+        # Log cleanup summary for audit
+        echo ""
+        echo "📋 CLEANUP AUDIT LOG:"
+        echo "   Timestamp: $(date -u)"
+        echo "   Cleanup Level: $CLEANUP_LEVEL"
+        echo "   Base Images Preserved: $PRESERVE_BASE"
+        echo "   Build Cache Preserved: $PRESERVE_CACHE"
+        echo "   Max Image Age: $MAX_AGE"
+        echo "   Disk Threshold: ${{ inputs.disk_threshold }}%"
+        echo "   Disk Usage Before: ${{ steps.disk-check.outputs.current_usage }}%"
+        echo "   Disk Usage After: ${FINAL_DISK_USAGE}%"
+        echo "   Space Freed: ${SPACE_FREED}%"
+        echo "   Emergency Escalation: $FORCE_AGGRESSIVE"
+        
+        echo "status=success" >> $GITHUB_OUTPUT

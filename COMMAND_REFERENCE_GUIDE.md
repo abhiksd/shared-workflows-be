@@ -911,6 +911,132 @@ seq 1 10 | xargs -n1 -P10 curl -s http://localhost:8080/api/test
 curl --http2 -I https://my-app.example.com/
 ```
 
+### **Docker Registry and Image Troubleshooting**
+```bash
+# Azure Container Registry (ACR) API testing
+# Authenticate and get catalog
+curl -u username:password https://registry-name.azurecr.io/v2/_catalog
+
+# Get repository tags
+curl -u username:password https://registry-name.azurecr.io/v2/my-app/tags/list
+
+# Get image manifest
+curl -u username:password \
+  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+  https://registry-name.azurecr.io/v2/my-app/manifests/latest
+
+# Check registry health
+curl https://registry-name.azurecr.io/v2/
+
+# Docker Hub API testing
+# Get repository information
+curl https://hub.docker.com/v2/repositories/library/ubuntu/
+
+# Get image tags
+curl https://hub.docker.com/v2/repositories/library/ubuntu/tags/
+
+# Private registry authentication test
+curl -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
+  https://your-private-registry.com/v2/_catalog
+
+# Test image pull without Docker (registry API)
+TOKEN=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/ubuntu:pull" | jq -r .token)
+curl -H "Authorization: Bearer $TOKEN" \
+  https://registry-1.docker.io/v2/library/ubuntu/manifests/latest
+
+# Check registry storage and cleanup API (if supported)
+curl -X GET \
+  -u username:password \
+  https://registry-name.azurecr.io/v2/_catalog?n=100
+
+# ACR webhook testing
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"id":"test","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","action":"push","target":{"repository":"my-app","tag":"latest"}}' \
+  https://webhook-endpoint/acr
+```
+
+### **Docker Cleanup Monitoring**
+```bash
+# Monitor Docker system usage via API (if Docker API exposed)
+curl --unix-socket /var/run/docker.sock http://localhost/system/df
+
+# Get Docker system information
+curl --unix-socket /var/run/docker.sock http://localhost/info
+
+# List all images via API
+curl --unix-socket /var/run/docker.sock http://localhost/images/json
+
+# List all containers via API
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json?all=true
+
+# Monitor Docker events via API
+curl --unix-socket /var/run/docker.sock http://localhost/events
+
+# Check Docker daemon health
+curl --unix-socket /var/run/docker.sock http://localhost/version
+
+# Docker stats via API
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json | \
+  jq -r '.[].Id' | \
+  xargs -I {} curl --unix-socket /var/run/docker.sock http://localhost/containers/{}/stats?stream=false
+
+# Cleanup operation monitoring (if cleanup API exposed)
+curl -X POST http://cleanup-service/api/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{"level":"light","preserve_cache":true}'
+
+# Check cleanup job status
+curl http://cleanup-service/api/cleanup/status
+
+# Get cleanup history
+curl http://cleanup-service/api/cleanup/history
+
+# Disk usage monitoring via API
+curl http://monitoring-service/api/disk-usage
+
+# Real-time cleanup monitoring
+curl -N http://cleanup-service/api/cleanup/stream
+```
+
+### **Registry Cleanup and Maintenance**
+```bash
+# ACR repository cleanup (Azure CLI REST calls)
+# List repositories for cleanup
+curl -H "Authorization: Bearer $AZURE_TOKEN" \
+  "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/Microsoft.ContainerRegistry/registries/$REGISTRY_NAME/repositories?api-version=2019-05-01"
+
+# Delete old image tags
+curl -X DELETE \
+  -H "Authorization: Bearer $AZURE_TOKEN" \
+  "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/Microsoft.ContainerRegistry/registries/$REGISTRY_NAME/repositories/my-app/tags/old-tag?api-version=2019-05-01"
+
+# Purge deleted images (permanently delete)
+curl -X POST \
+  -H "Authorization: Bearer $AZURE_TOKEN" \
+  "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/Microsoft.ContainerRegistry/registries/$REGISTRY_NAME/purgeManifests?api-version=2019-05-01" \
+  -d '{"tagFilters":[".*"],"until":"2024-01-01T00:00:00Z"}'
+
+# Registry storage usage
+curl -H "Authorization: Bearer $AZURE_TOKEN" \
+  "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/Microsoft.ContainerRegistry/registries/$REGISTRY_NAME/usage?api-version=2019-05-01"
+
+# Private registry garbage collection (if supported)
+curl -X POST \
+  -u username:password \
+  https://your-private-registry.com/api/v1/gc
+
+# Registry catalog with size information
+curl -u username:password \
+  https://registry-name.azurecr.io/v2/_catalog | \
+  jq -r '.repositories[]' | \
+  while read repo; do
+    echo "Repository: $repo"
+    curl -u username:password \
+      https://registry-name.azurecr.io/v2/$repo/tags/list
+  done
+```
+
 ### **Workflow-Specific Troubleshooting**
 ```bash
 # Check GitHub workflow status via API

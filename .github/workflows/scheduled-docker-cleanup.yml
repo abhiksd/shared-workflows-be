@@ -1,0 +1,395 @@
+name: Scheduled Docker Cleanup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'      # Daily cleanup at 2 AM UTC (moderate)
+    - cron: '0 14 * * 0'     # Weekly aggressive cleanup on Sundays at 2 PM UTC
+    - cron: '0 6 * * *'      # Additional morning cleanup at 6 AM UTC (light)
+  workflow_dispatch:
+    inputs:
+      cleanup_level:
+        description: 'Cleanup level'
+        required: true
+        default: 'aggressive'
+        type: choice
+        options:
+        - light
+        - moderate
+        - aggressive
+        - emergency
+      runner_label:
+        description: 'Target specific runner (optional)'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      preserve_base_images:
+        description: 'Preserve base images for faster builds'
+        required: false
+        type: boolean
+        default: true
+      preserve_cache:
+        description: 'Preserve Docker build cache'
+        required: false
+        type: boolean
+        default: true
+      max_image_age:
+        description: 'Maximum age for images to preserve'
+        required: false
+        type: string
+        default: '24h'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  determine-cleanup-strategy:
+    runs-on: ubuntu-latest
+    outputs:
+      cleanup_level: ${{ steps.determine.outputs.level }}
+      preserve_base: ${{ steps.determine.outputs.preserve_base }}
+      preserve_cache: ${{ steps.determine.outputs.preserve_cache }}
+      max_age: ${{ steps.determine.outputs.max_age }}
+      schedule_type: ${{ steps.determine.outputs.schedule_type }}
+    steps:
+      - name: Determine cleanup strategy
+        id: determine
+        run: |
+          echo "🎯 Determining cleanup strategy..."
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger - use inputs
+            echo "📝 Manual trigger detected - using provided inputs"
+            echo "level=${{ inputs.cleanup_level }}" >> $GITHUB_OUTPUT
+            echo "preserve_base=${{ inputs.preserve_base_images }}" >> $GITHUB_OUTPUT
+            echo "preserve_cache=${{ inputs.preserve_cache }}" >> $GITHUB_OUTPUT
+            echo "max_age=${{ inputs.max_image_age }}" >> $GITHUB_OUTPUT
+            echo "schedule_type=manual" >> $GITHUB_OUTPUT
+          else
+            # Scheduled trigger - determine based on schedule
+            SCHEDULE="${{ github.event.schedule }}"
+            echo "📅 Scheduled trigger detected: $SCHEDULE"
+            
+            case "$SCHEDULE" in
+              "0 2 * * *")
+                # Daily cleanup at 2 AM - moderate
+                echo "🌙 Daily moderate cleanup (2 AM UTC)"
+                echo "level=moderate" >> $GITHUB_OUTPUT
+                echo "preserve_base=true" >> $GITHUB_OUTPUT
+                echo "preserve_cache=true" >> $GITHUB_OUTPUT
+                echo "max_age=24h" >> $GITHUB_OUTPUT
+                echo "schedule_type=daily-moderate" >> $GITHUB_OUTPUT
+                ;;
+              "0 14 * * 0")
+                # Weekly cleanup on Sunday - aggressive
+                echo "🗓️ Weekly aggressive cleanup (Sunday 2 PM UTC)"
+                echo "level=aggressive" >> $GITHUB_OUTPUT
+                echo "preserve_base=true" >> $GITHUB_OUTPUT
+                echo "preserve_cache=false" >> $GITHUB_OUTPUT
+                echo "max_age=12h" >> $GITHUB_OUTPUT
+                echo "schedule_type=weekly-aggressive" >> $GITHUB_OUTPUT
+                ;;
+              "0 6 * * *")
+                # Morning cleanup at 6 AM - light
+                echo "🌅 Morning light cleanup (6 AM UTC)"
+                echo "level=light" >> $GITHUB_OUTPUT
+                echo "preserve_base=true" >> $GITHUB_OUTPUT
+                echo "preserve_cache=true" >> $GITHUB_OUTPUT
+                echo "max_age=48h" >> $GITHUB_OUTPUT
+                echo "schedule_type=morning-light" >> $GITHUB_OUTPUT
+                ;;
+              *)
+                # Default fallback
+                echo "❓ Unknown schedule - using default moderate cleanup"
+                echo "level=moderate" >> $GITHUB_OUTPUT
+                echo "preserve_base=true" >> $GITHUB_OUTPUT
+                echo "preserve_cache=true" >> $GITHUB_OUTPUT
+                echo "max_age=24h" >> $GITHUB_OUTPUT
+                echo "schedule_type=unknown" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          fi
+          
+          echo "✅ Cleanup strategy determined:"
+          echo "   Level: $(cat $GITHUB_OUTPUT | grep level= | cut -d= -f2)"
+          echo "   Preserve Base: $(cat $GITHUB_OUTPUT | grep preserve_base= | cut -d= -f2)"
+          echo "   Preserve Cache: $(cat $GITHUB_OUTPUT | grep preserve_cache= | cut -d= -f2)"
+          echo "   Max Age: $(cat $GITHUB_OUTPUT | grep max_age= | cut -d= -f2)"
+          echo "   Schedule Type: $(cat $GITHUB_OUTPUT | grep schedule_type= | cut -d= -f2)"
+
+  cleanup-github-hosted-runners:
+    runs-on: ${{ inputs.runner_label || 'ubuntu-latest' }}
+    needs: determine-cleanup-strategy
+    strategy:
+      matrix:
+        # Add different runner types if you have multiple
+        runner: ['ubuntu-latest']
+        # For organizations with multiple runner types:
+        # runner: ['ubuntu-latest', 'ubuntu-20.04', 'windows-latest', 'macos-latest']
+      fail-fast: false  # Continue cleanup on other runners even if one fails
+    continue-on-error: true
+    steps:
+      - name: Checkout (for actions)
+        uses: actions/checkout@v4
+
+      - name: Pre-cleanup System Info
+        run: |
+          echo "🔍 Pre-cleanup system information:"
+          echo "   Runner: ${{ matrix.runner }}"
+          echo "   OS: $(uname -a)"
+          echo "   Cleanup Strategy: ${{ needs.determine-cleanup-strategy.outputs.schedule_type }}"
+          echo "   Cleanup Level: ${{ needs.determine-cleanup-strategy.outputs.cleanup_level }}"
+          echo ""
+          echo "💾 Current disk usage:"
+          df -h / | head -2
+          echo ""
+          if command -v docker &> /dev/null; then
+            echo "🐳 Current Docker resources:"
+            echo "   Images: $(docker images -q | wc -l)"
+            echo "   Containers: $(docker ps -aq | wc -l)"
+            echo "   Volumes: $(docker volume ls -q | wc -l)"
+            echo "   Networks: $(docker network ls -q | wc -l)"
+            echo "   System usage:"
+            docker system df 2>/dev/null || echo "   Unable to get Docker system usage"
+          else
+            echo "🐳 Docker not available on this runner"
+          fi
+
+      - name: Smart Docker Cleanup
+        id: cleanup
+        uses: ./.github/actions/smart-docker-cleanup
+        with:
+          cleanup_level: ${{ needs.determine-cleanup-strategy.outputs.cleanup_level }}
+          preserve_base_images: ${{ needs.determine-cleanup-strategy.outputs.preserve_base }}
+          preserve_cache: ${{ needs.determine-cleanup-strategy.outputs.preserve_cache }}
+          max_image_age: ${{ needs.determine-cleanup-strategy.outputs.max_age }}
+          disk_threshold: '80'  # Slightly lower threshold for scheduled cleanup
+
+      - name: Post-cleanup Report
+        if: always()
+        run: |
+          echo "📊 CLEANUP COMPLETED ON RUNNER: ${{ matrix.runner }}"
+          echo ""
+          echo "🎯 Cleanup Results:"
+          echo "   Status: ${{ steps.cleanup.outputs.cleanup_status }}"
+          echo "   Level Used: ${{ steps.cleanup.outputs.cleanup_level_used }}"
+          echo "   Disk Before: ${{ steps.cleanup.outputs.disk_usage_before }}%"
+          echo "   Disk After: ${{ steps.cleanup.outputs.disk_usage_after }}%"
+          
+          # Calculate improvement
+          if [ -n "${{ steps.cleanup.outputs.disk_usage_before }}" ] && [ -n "${{ steps.cleanup.outputs.disk_usage_after }}" ]; then
+            BEFORE=${{ steps.cleanup.outputs.disk_usage_before }}
+            AFTER=${{ steps.cleanup.outputs.disk_usage_after }}
+            IMPROVEMENT=$((BEFORE - AFTER))
+            echo "   Space Freed: ${IMPROVEMENT}%"
+            
+            if [ $IMPROVEMENT -gt 0 ]; then
+              echo "✅ Cleanup was effective"
+            elif [ $IMPROVEMENT -eq 0 ]; then
+              echo "ℹ️ No space freed (may indicate clean system)"
+            else
+              echo "⚠️ Disk usage increased (unexpected)"
+            fi
+          fi
+          
+          echo ""
+          echo "💾 Final disk usage:"
+          df -h / | head -2
+          
+          if command -v docker &> /dev/null; then
+            echo ""
+            echo "🐳 Final Docker resource summary:"
+            echo "   Images: $(docker images -q | wc -l)"
+            echo "   Containers: $(docker ps -aq | wc -l)"
+            echo "   Volumes: $(docker volume ls -q | wc -l)"
+            echo "   Networks: $(docker network ls -q | wc -l)"
+          fi
+
+      - name: Cleanup Health Check
+        if: always()
+        run: |
+          echo "🏥 Performing post-cleanup health check..."
+          
+          # Check if Docker is still functional
+          if command -v docker &> /dev/null; then
+            if docker version >/dev/null 2>&1; then
+              echo "✅ Docker daemon is responsive"
+            else
+              echo "❌ Docker daemon is not responsive"
+              docker version || true
+            fi
+            
+            # Try to pull a small test image to verify functionality
+            echo "🧪 Testing Docker functionality..."
+            if docker pull hello-world:latest >/dev/null 2>&1; then
+              echo "✅ Docker pull functionality works"
+              docker rmi hello-world:latest >/dev/null 2>&1 || true
+            else
+              echo "⚠️ Docker pull functionality may be impaired"
+            fi
+          else
+            echo "ℹ️ Docker not available for health check"
+          fi
+          
+          # Check disk space is not critically low
+          DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+          if [ $DISK_USAGE -lt 90 ]; then
+            echo "✅ Disk usage is healthy: ${DISK_USAGE}%"
+          elif [ $DISK_USAGE -lt 95 ]; then
+            echo "⚠️ Disk usage is high: ${DISK_USAGE}%"
+          else
+            echo "🚨 Disk usage is critical: ${DISK_USAGE}%"
+          fi
+
+  # Self-hosted runners cleanup (if applicable)
+  cleanup-self-hosted-runners:
+    runs-on: self-hosted
+    needs: determine-cleanup-strategy
+    if: false  # Enable this job if you have self-hosted runners
+    strategy:
+      matrix:
+        # Define your self-hosted runner labels
+        runner: ['self-hosted-prod', 'self-hosted-dev']
+      fail-fast: false
+    continue-on-error: true
+    steps:
+      - name: Checkout (for actions)
+        uses: actions/checkout@v4
+
+      - name: Self-hosted Runner Cleanup
+        uses: ./.github/actions/smart-docker-cleanup
+        with:
+          cleanup_level: ${{ needs.determine-cleanup-strategy.outputs.cleanup_level }}
+          preserve_base_images: ${{ needs.determine-cleanup-strategy.outputs.preserve_base }}
+          preserve_cache: ${{ needs.determine-cleanup-strategy.outputs.preserve_cache }}
+          max_image_age: ${{ needs.determine-cleanup-strategy.outputs.max_age }}
+          disk_threshold: '75'  # Lower threshold for self-hosted runners
+
+      - name: Self-hosted Post-cleanup Report
+        if: always()
+        run: |
+          echo "📊 Self-hosted runner cleanup completed: ${{ matrix.runner }}"
+          echo "💾 Disk usage:"
+          df -h / | head -2
+
+  notify-cleanup-completion:
+    runs-on: ubuntu-latest
+    needs: [determine-cleanup-strategy, cleanup-github-hosted-runners]
+    if: always()
+    steps:
+      - name: Generate Cleanup Summary
+        id: summary
+        run: |
+          echo "📊 SCHEDULED DOCKER CLEANUP SUMMARY"
+          echo "=" | tr '=' '=' | head -c 50; echo ""
+          echo ""
+          echo "🕐 Execution Details:"
+          echo "   Trigger: ${{ github.event_name }}"
+          echo "   Schedule Type: ${{ needs.determine-cleanup-strategy.outputs.schedule_type }}"
+          echo "   Timestamp: $(date -u)"
+          echo "   Workflow Run: ${{ github.run_id }}"
+          echo ""
+          echo "🔧 Cleanup Configuration:"
+          echo "   Level: ${{ needs.determine-cleanup-strategy.outputs.cleanup_level }}"
+          echo "   Preserve Base Images: ${{ needs.determine-cleanup-strategy.outputs.preserve_base }}"
+          echo "   Preserve Cache: ${{ needs.determine-cleanup-strategy.outputs.preserve_cache }}"
+          echo "   Max Image Age: ${{ needs.determine-cleanup-strategy.outputs.max_age }}"
+          echo ""
+          echo "📈 Results:"
+          echo "   GitHub Hosted Runners: ${{ needs.cleanup-github-hosted-runners.result }}"
+          
+          # Determine overall status
+          if [ "${{ needs.cleanup-github-hosted-runners.result }}" = "success" ]; then
+            echo "   Overall Status: ✅ SUCCESS"
+            echo "overall_status=success" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.cleanup-github-hosted-runners.result }}" = "failure" ]; then
+            echo "   Overall Status: ❌ FAILURE"
+            echo "overall_status=failure" >> $GITHUB_OUTPUT
+          else
+            echo "   Overall Status: ⚠️ PARTIAL"
+            echo "overall_status=partial" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Notification (Optional)
+        if: always()
+        run: |
+          # This is a placeholder for notification integration
+          # Uncomment and configure based on your notification preferences
+          
+          echo "📢 Cleanup notification ready to send..."
+          echo "Status: ${{ steps.summary.outputs.overall_status }}"
+          
+          # Example: Slack notification
+          # WEBHOOK_URL="${{ secrets.SLACK_WEBHOOK_URL }}"
+          # if [ -n "$WEBHOOK_URL" ]; then
+          #   EMOJI="${{ steps.summary.outputs.overall_status == 'success' && '✅' || '❌' }}"
+          #   MESSAGE="${EMOJI} Docker cleanup completed: ${{ needs.determine-cleanup-strategy.outputs.cleanup_level }} level"
+          #   curl -X POST "$WEBHOOK_URL" \
+          #     -H 'Content-type: application/json' \
+          #     -d "{\"text\":\"$MESSAGE\"}"
+          # fi
+          
+          # Example: Microsoft Teams notification
+          # TEAMS_WEBHOOK="${{ secrets.TEAMS_WEBHOOK_URL }}"
+          # if [ -n "$TEAMS_WEBHOOK" ]; then
+          #   curl -X POST "$TEAMS_WEBHOOK" \
+          #     -H 'Content-Type: application/json' \
+          #     -d "{\"text\":\"Docker cleanup completed with status: ${{ steps.summary.outputs.overall_status }}\"}"
+          # fi
+          
+          # Example: Email notification (using mail command if available)
+          # if command -v mail &> /dev/null; then
+          #   echo "Docker cleanup completed with status: ${{ steps.summary.outputs.overall_status }}" | \
+          #     mail -s "Docker Cleanup Report" devops@company.com
+          # fi
+          
+          echo "ℹ️ To enable notifications, configure webhook URLs in repository secrets"
+          echo "   - SLACK_WEBHOOK_URL for Slack notifications"
+          echo "   - TEAMS_WEBHOOK_URL for Microsoft Teams notifications"
+
+  cleanup-audit-log:
+    runs-on: ubuntu-latest
+    needs: [determine-cleanup-strategy, cleanup-github-hosted-runners, notify-cleanup-completion]
+    if: always()
+    steps:
+      - name: Generate Audit Log
+        run: |
+          echo "📋 DOCKER CLEANUP AUDIT LOG"
+          echo "=========================="
+          echo ""
+          echo "🏷️ Metadata:"
+          echo "   Repository: ${{ github.repository }}"
+          echo "   Workflow: ${{ github.workflow }}"
+          echo "   Run ID: ${{ github.run_id }}"
+          echo "   Run Number: ${{ github.run_number }}"
+          echo "   Actor: ${{ github.actor }}"
+          echo "   Event: ${{ github.event_name }}"
+          echo "   Ref: ${{ github.ref }}"
+          echo "   SHA: ${{ github.sha }}"
+          echo ""
+          echo "⏰ Timing:"
+          echo "   Start Time: $(date -u)"
+          echo "   Schedule Type: ${{ needs.determine-cleanup-strategy.outputs.schedule_type }}"
+          echo ""
+          echo "🔧 Configuration:"
+          echo "   Cleanup Level: ${{ needs.determine-cleanup-strategy.outputs.cleanup_level }}"
+          echo "   Base Images Preserved: ${{ needs.determine-cleanup-strategy.outputs.preserve_base }}"
+          echo "   Cache Preserved: ${{ needs.determine-cleanup-strategy.outputs.preserve_cache }}"
+          echo "   Max Image Age: ${{ needs.determine-cleanup-strategy.outputs.max_age }}"
+          echo ""
+          echo "📊 Results:"
+          echo "   GitHub Hosted: ${{ needs.cleanup-github-hosted-runners.result }}"
+          echo "   Notification: ${{ needs.notify-cleanup-completion.result }}"
+          echo ""
+          echo "🔍 Next Scheduled Cleanups:"
+          echo "   Morning Light (6 AM UTC): Daily"
+          echo "   Daily Moderate (2 AM UTC): Daily"
+          echo "   Weekly Aggressive (Sun 2 PM UTC): Weekly"
+          echo ""
+          echo "📝 Notes:"
+          echo "   - This audit log is generated for compliance and troubleshooting"
+          echo "   - All cleanup operations preserve essential base images by default"
+          echo "   - Emergency cleanup is triggered automatically if disk usage exceeds 80%"
+          echo "   - Manual cleanup can be triggered via workflow_dispatch"
+          echo ""
+          echo "🔗 Workflow URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
