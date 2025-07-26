@@ -58,9 +58,6 @@ env:
   AKS_RESOURCE_GROUP_PROD: "rg-aks-prod"
   # Blue-Green Deployment Configuration for Production
   BLUE_GREEN_ENABLED: "true"
-  CANARY_ENABLED: "true"
-  CANARY_STEPS: "5,10,25,50,100"  # Traffic percentage steps
-  HEALTH_CHECK_DURATION: "300"    # 5 minutes per step
   
 jobs:
   validate-environment:
@@ -378,9 +375,7 @@ jobs:
     needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
     if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && needs.validate-environment.outputs.target_environment == 'prod' && !failure() && !cancelled()
     outputs:
-      current_slot: ${{ steps.determine-slot.outputs.current_slot }}
       target_slot: ${{ steps.determine-slot.outputs.target_slot }}
-      deployment_strategy: ${{ steps.determine-slot.outputs.deployment_strategy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -402,78 +397,27 @@ jobs:
       - name: Determine Blue-Green deployment slot
         id: determine-slot
         run: |
-          echo "🔍 Determining current active slot and deployment strategy..."
-          echo "========================================================"
-          
           APP_NAME="${{ inputs.application_name }}"
           TARGET_ENV="${{ needs.validate-environment.outputs.target_environment }}"
           
-          # Check which namespace is currently active
+          # Create namespaces
           BLUE_NS="${TARGET_ENV}-${APP_NAME}-blue"
           GREEN_NS="${TARGET_ENV}-${APP_NAME}-green"
-          
-          echo "📋 Checking namespace status:"
-          echo "   Blue namespace: $BLUE_NS"
-          echo "   Green namespace: $GREEN_NS"
-          
-          # Create namespaces if they don't exist
           kubectl create namespace $BLUE_NS --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace $GREEN_NS --dry-run=client -o yaml | kubectl apply -f -
           
-          # Check current active slot by looking at ingress or service configuration
-          CURRENT_ACTIVE=""
-          if kubectl get ingress ${TARGET_ENV}-${APP_NAME}-ingress -n default >/dev/null 2>&1; then
-            # Check ingress backend namespace
-            INGRESS_BACKEND=$(kubectl get ingress ${TARGET_ENV}-${APP_NAME}-ingress -n default -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.namespace}' 2>/dev/null || echo "")
-            if [[ "$INGRESS_BACKEND" == "$BLUE_NS" ]]; then
-              CURRENT_ACTIVE="blue"
-            elif [[ "$INGRESS_BACKEND" == "$GREEN_NS" ]]; then
-              CURRENT_ACTIVE="green"
-            fi
-          fi
+          # Simple logic: Check which slot has active pods, deploy to the other
+          BLUE_PODS=$(kubectl get pods -n $BLUE_NS --no-headers 2>/dev/null | wc -l || echo "0")
+          GREEN_PODS=$(kubectl get pods -n $GREEN_NS --no-headers 2>/dev/null | wc -l || echo "0")
           
-          # If no ingress found, check for running deployments
-          if [[ -z "$CURRENT_ACTIVE" ]]; then
-            BLUE_PODS=$(kubectl get pods -n $BLUE_NS --no-headers 2>/dev/null | wc -l)
-            GREEN_PODS=$(kubectl get pods -n $GREEN_NS --no-headers 2>/dev/null | wc -l)
-            
-            if [[ $BLUE_PODS -gt 0 && $GREEN_PODS -eq 0 ]]; then
-              CURRENT_ACTIVE="blue"
-            elif [[ $GREEN_PODS -gt 0 && $BLUE_PODS -eq 0 ]]; then
-              CURRENT_ACTIVE="green"
-            elif [[ $BLUE_PODS -eq 0 && $GREEN_PODS -eq 0 ]]; then
-              CURRENT_ACTIVE="blue"  # Default to blue for first deployment
-            else
-              CURRENT_ACTIVE="blue"  # Default to blue if both have pods
-            fi
-          fi
-          
-          # Determine target slot (opposite of current)
-          if [[ "$CURRENT_ACTIVE" == "blue" ]]; then
-            TARGET_SLOT="green"
-          else
+          if [[ $GREEN_PODS -gt 0 ]]; then
             TARGET_SLOT="blue"
+          else
+            TARGET_SLOT="green"
           fi
           
-          # Determine deployment strategy
-          STRATEGY="blue-green"
-          if [[ "${{ env.CANARY_ENABLED }}" == "true" ]]; then
-            STRATEGY="blue-green-canary"
-          fi
-          
-          echo "📊 Deployment Strategy Results:"
-          echo "   Current active slot: $CURRENT_ACTIVE"
-          echo "   Target deployment slot: $TARGET_SLOT"
-          echo "   Deployment strategy: $STRATEGY"
-          echo "   Blue namespace: $BLUE_NS"
-          echo "   Green namespace: $GREEN_NS"
-          
-          # Set outputs
-          echo "current_slot=$CURRENT_ACTIVE" >> $GITHUB_OUTPUT
+          echo "🔵🟢 Blue-Green Strategy: Deploying to ${TARGET_SLOT} slot"
           echo "target_slot=$TARGET_SLOT" >> $GITHUB_OUTPUT
-          echo "deployment_strategy=$STRATEGY" >> $GITHUB_OUTPUT
-          echo "blue_namespace=$BLUE_NS" >> $GITHUB_OUTPUT
-          echo "green_namespace=$GREEN_NS" >> $GITHUB_OUTPUT
 
   # Production approval gate - requires manual approval for prod deployments
   production-approval:
@@ -494,8 +438,7 @@ jobs:
           echo "   Image Tag: ${{ needs.setup.outputs.image_tag }}"
           echo "   Environment: ${{ needs.validate-environment.outputs.target_environment }}"
           echo "   AKS Cluster: ${{ needs.validate-environment.outputs.aks_cluster_name_1 }}"
-          echo "   Deployment Strategy: ${{ needs.blue-green-strategy.outputs.deployment_strategy }}"
-          echo "   Current Active Slot: ${{ needs.blue-green-strategy.outputs.current_slot }}"
+          echo "   Deployment Strategy: Blue-Green"
           echo "   Target Deployment Slot: ${{ needs.blue-green-strategy.outputs.target_slot }}"
           echo ""
           echo "✅ Quality Gates Status:"
@@ -582,11 +525,7 @@ jobs:
           keyvault_name: ${{ secrets.KEYVAULT_NAME }}
           # Blue-Green deployment parameters for production
           blue_green_enabled: ${{ env.BLUE_GREEN_ENABLED }}
-          current_slot: ${{ needs.blue-green-strategy.outputs.current_slot }}
           target_slot: ${{ needs.blue-green-strategy.outputs.target_slot }}
-          deployment_strategy: ${{ needs.blue-green-strategy.outputs.deployment_strategy }}
-          canary_steps: ${{ env.CANARY_STEPS }}
-          health_check_duration: ${{ env.HEALTH_CHECK_DURATION }}
 
   create_release:
     runs-on: ubuntu-latest
