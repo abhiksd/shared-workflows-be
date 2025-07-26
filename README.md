@@ -69,20 +69,47 @@ Streamlined CI/CD pipeline for Java Spring Boot applications:
 | **PROD** | Auto + Manual | `tags` | `aks-prod-cluster` |
 
 ### Manual Deployment Options
-```bash
-# Deploy to any environment
-gh workflow run deploy.yml -f environment=prod
 
-# Deploy with branch override
+#### **Standard Deployment (Authorized Branches)**
+```bash
+# Deploy to DEV from dev branch (no override needed)
+gh workflow run deploy.yml -f environment=dev
+
+# Deploy to PROD from tag (no override needed)  
+git tag v1.0.0 && git push origin v1.0.0
+gh workflow run deploy.yml -f environment=prod
+```
+
+#### **Override Deployment (Any Branch)**
+```bash
+# Deploy to DEV from any branch with override
+gh workflow run deploy.yml \
+  -f environment=dev \
+  -f override_branch_validation=true \
+  -f deploy_notes="Testing feature branch deployment"
+
+# Deploy to PROD from any branch with override (CRITICAL)
 gh workflow run deploy.yml \
   -f environment=prod \
   -f override_branch_validation=true \
-  -f deploy_notes="Emergency hotfix deployment"
+  -f deploy_notes="Emergency hotfix - approved by incident commander"
+```
 
-# Emergency bypass (if needed)
+#### **Branch Validation Rules**
+- **DEV/SQE**: Manual deployments from wrong branch **require override**
+- **PPR**: Manual deployments from non-release branch **require override**  
+- **PROD**: Manual deployments from non-tag **require override**
+- **Override Usage**: Logged with user attribution for audit compliance
+
+#### **Emergency Security Bypass** (Repository Level)
+```bash
+# Temporarily bypass security scans (use with extreme caution)
 gh variable set EMERGENCY_BYPASS_SONAR --body "true"
+gh variable set EMERGENCY_BYPASS_CHECKMARX --body "true"
 gh workflow run deploy.yml -f environment=prod
+# Remember to remove after deployment
 gh variable delete EMERGENCY_BYPASS_SONAR
+gh variable delete EMERGENCY_BYPASS_CHECKMARX
 ```
 
 ## 🧩 Composite Actions
