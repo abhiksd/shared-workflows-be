@@ -62,8 +62,9 @@ on:
 
     secrets: inherit
 
-env:
-  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+# Registry will be set dynamically based on environment
+# env:
+#   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}  # Now environment-specific
   
 
   
@@ -594,6 +595,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [validate-environment, setup, maven-build, sonar-scan, checkmarx-scan]
     if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && !failure() && !cancelled()
+    environment: ${{ needs.validate-environment.outputs.target_environment }}
     steps:
       - name: Clean workspace and Docker
         uses: ./.github/actions/workspace-cleanup
@@ -603,6 +605,50 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure Environment-Specific Settings
+        id: env-config
+        run: |
+          echo "🔧 Configuring environment-specific settings for: ${{ needs.validate-environment.outputs.target_environment }}"
+          echo "📋 Environment-specific secrets loaded:"
+          echo "   ACR Server: ${{ secrets.ACR_LOGIN_SERVER }}"
+          echo "   Azure Tenant ID: ${{ secrets.AZURE_TENANT_ID }}"
+          echo "   Azure Client ID: ${{ secrets.AZURE_CLIENT_ID }}"
+          echo "   Azure Subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          
+          # Validate required environment secrets
+          ERRORS=0
+          if [ -z "${{ secrets.ACR_LOGIN_SERVER }}" ]; then
+            echo "❌ ACR_LOGIN_SERVER not configured for environment: ${{ needs.validate-environment.outputs.target_environment }}"
+            ERRORS=$((ERRORS + 1))
+          fi
+          
+          if [ -z "${{ secrets.AZURE_TENANT_ID }}" ]; then
+            echo "❌ AZURE_TENANT_ID not configured for environment: ${{ needs.validate-environment.outputs.target_environment }}"
+            ERRORS=$((ERRORS + 1))
+          fi
+          
+          if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ]; then
+            echo "❌ AZURE_CLIENT_ID not configured for environment: ${{ needs.validate-environment.outputs.target_environment }}"
+            ERRORS=$((ERRORS + 1))
+          fi
+          
+          if [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
+            echo "❌ AZURE_SUBSCRIPTION_ID not configured for environment: ${{ needs.validate-environment.outputs.target_environment }}"
+            ERRORS=$((ERRORS + 1))
+          fi
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo "❌ $ERRORS environment secrets missing. Please configure secrets in GitHub Environment settings."
+            echo "📋 Required environment secrets:"
+            echo "   - AZURE_TENANT_ID"
+            echo "   - AZURE_CLIENT_ID" 
+            echo "   - AZURE_SUBSCRIPTION_ID"
+            echo "   - ACR_LOGIN_SERVER"
+            exit 1
+          fi
+          
+          echo "✅ All environment secrets validated for ${{ needs.validate-environment.outputs.target_environment }}"
 
       - name: Download Maven build artifacts
         if: inputs.application_type == 'java-springboot'
@@ -619,7 +665,7 @@ jobs:
           build_context: ${{ inputs.build_context }}
           dockerfile_path: ${{ inputs.dockerfile_path }}
           image_tag: ${{ needs.setup.outputs.image_tag }}
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -666,6 +712,24 @@ jobs:
           echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
         fi
 
+      - name: Validate Environment Secrets
+        run: |
+          echo "🔧 Validating environment secrets for deployment to: ${{ needs.validate-environment.outputs.target_environment }}"
+          echo "📋 Environment secrets check:"
+          echo "   ACR Server: ${{ secrets.ACR_LOGIN_SERVER }}"
+          echo "   Azure Tenant ID: ${{ secrets.AZURE_TENANT_ID }}"
+          echo "   Azure Client ID: ${{ secrets.AZURE_CLIENT_ID }}"
+          echo "   Azure Subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          
+          # Quick validation for deployment
+          if [ -z "${{ secrets.ACR_LOGIN_SERVER }}" ] || [ -z "${{ secrets.AZURE_TENANT_ID }}" ] || [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] || [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
+            echo "❌ One or more environment secrets are missing for deployment"
+            echo "Please configure all required secrets in GitHub Environment: ${{ needs.validate-environment.outputs.target_environment }}"
+            exit 1
+          fi
+          
+          echo "✅ All environment secrets validated for deployment"
+
       - name: Deploy to AKS
         uses: ./.github/actions/helm-deploy
         with:
@@ -675,7 +739,7 @@ jobs:
           helm_chart_path: ${{ inputs.helm_chart_path }}
           image_tag: ${{ needs.setup.outputs.image_tag }}
           helm_version: ${{ needs.setup.outputs.helm_version }}
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
           aks_cluster_name: ${{ needs.validate-environment.outputs.aks_cluster_name }}
           aks_resource_group: ${{ needs.validate-environment.outputs.aks_resource_group }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
