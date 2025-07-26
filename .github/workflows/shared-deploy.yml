@@ -68,15 +68,6 @@ on:
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
-  # AKS Cluster Configuration - Update these values to change cluster settings
-  AKS_CLUSTER_NAME_DEV: "aks-dev-cluster"
-  AKS_RESOURCE_GROUP_DEV: "rg-aks-dev"
-  AKS_CLUSTER_NAME_SQE: "aks-sqe-cluster"
-  AKS_RESOURCE_GROUP_SQE: "rg-aks-sqe"
-  AKS_CLUSTER_NAME_PPR: "aks-preprod-cluster"
-  AKS_RESOURCE_GROUP_PPR: "rg-aks-preprod"
-  AKS_CLUSTER_NAME_PROD: "aks-prod-cluster"
-  AKS_RESOURCE_GROUP_PROD: "rg-aks-prod"
   
 
   
@@ -86,8 +77,8 @@ jobs:
     outputs:
       should_deploy: ${{ steps.check.outputs.should_deploy }}
       target_environment: ${{ steps.check.outputs.target_environment }}
-      aks_cluster_name_1: ${{ steps.check.outputs.aks_cluster_name }}
-      aks_resource_group_1: ${{ steps.check.outputs.aks_resource_group }}
+      aks_cluster_name: ${{ steps.check.outputs.aks_cluster_name }}
+      aks_resource_group: ${{ steps.check.outputs.aks_resource_group }}
     steps:
       - name: Validate environment and branch rules
         id: check
@@ -218,8 +209,8 @@ jobs:
             "dev")
               if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_DEV }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_DEV }}"
+                AKS_CLUSTER="aks-dev-cluster"
+                AKS_RG="rg-aks-dev"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ Dev deployment approved: manual trigger with branch validation override"
                 else
@@ -227,8 +218,8 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_DEV }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_DEV }}"
+                AKS_CLUSTER="aks-dev-cluster"
+                AKS_RG="rg-aks-dev"
                 echo "✅ Dev deployment approved: manual override from branch $GITHUB_REF"
               else
                 echo "❌ Dev deployment blocked: must be dev/develop branch or use manual override"
@@ -237,8 +228,8 @@ jobs:
             "sqe")
               if [[ "$GITHUB_REF" == "refs/heads/sqe" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_SQE }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_SQE }}"
+                AKS_CLUSTER="aks-sqe-cluster"
+                AKS_RG="rg-aks-sqe"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ SQE deployment approved: manual trigger with branch validation override"
                 else
@@ -246,8 +237,8 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_SQE }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_SQE }}"
+                AKS_CLUSTER="aks-sqe-cluster"
+                AKS_RG="rg-aks-sqe"
                 echo "✅ SQE deployment approved: manual override from branch $GITHUB_REF"
               else
                 echo "❌ SQE deployment blocked: must be sqe branch or use manual override"
@@ -260,8 +251,8 @@ jobs:
                 echo "❌ PPR deployment blocked: protection validation failed"
               elif [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PPR }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_PPR }}"
+                AKS_CLUSTER="aks-preprod-cluster"
+                AKS_RG="rg-aks-preprod"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ Pre-Prod deployment approved: manual trigger with authorized override"
                 else
@@ -269,8 +260,8 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PPR }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_PPR }}"
+                AKS_CLUSTER="aks-preprod-cluster"
+                AKS_RG="rg-aks-preprod"
                 echo "✅ Pre-Prod deployment approved: authorized manual override from branch $GITHUB_REF"
               else
                 echo "❌ Pre-Prod deployment blocked: must be release branch or authorized manual override"
@@ -283,8 +274,8 @@ jobs:
                 echo "❌ PROD deployment blocked: protection validation failed"
               elif [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PROD }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_PROD }}"
+                AKS_CLUSTER="aks-prod-cluster"
+                AKS_RG="rg-aks-prod"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                   echo "✅ Production deployment approved: EMERGENCY manual trigger with authorized override"
                   echo "   🚨 EMERGENCY DEPLOYMENT: User=$ACTOR, Notes='$DEPLOY_NOTES'"
@@ -293,8 +284,8 @@ jobs:
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
-                AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_PROD }}"
-                AKS_RG="${{ env.AKS_RESOURCE_GROUP_PROD }}"
+                AKS_CLUSTER="aks-prod-cluster"
+                AKS_RG="rg-aks-prod"
                 echo "✅ Production deployment approved: EMERGENCY authorized manual override from branch $GITHUB_REF"
                 echo "   🚨 EMERGENCY DEPLOYMENT: User=$ACTOR, Notes='$DEPLOY_NOTES'"
               else
@@ -733,7 +724,7 @@ jobs:
           echo "   Version: ${{ needs.setup.outputs.version }}"
           echo "   Image Tag: ${{ needs.setup.outputs.image_tag }}"
           echo "   Environment: ${{ needs.validate-environment.outputs.target_environment }}"
-          echo "   AKS Cluster: ${{ needs.validate-environment.outputs.aks_cluster_name_1 }}"
+          echo "   AKS Cluster: ${{ needs.validate-environment.outputs.aks_cluster_name }}"
           echo ""
           echo "✅ Quality Gates Status:"
           echo "   SonarQube: ${{ needs.sonar-scan.outputs.scan_status }}"
@@ -792,21 +783,21 @@ jobs:
           echo "🔍 What deploy job received from validate-environment:"
           echo "should_deploy: '${{ needs.validate-environment.outputs.should_deploy }}'"
           echo "target_environment: '${{ needs.validate-environment.outputs.target_environment }}'"
-          echo "aks_cluster_name: '${{ needs.validate-environment.outputs.aks_cluster_name_1 }}'"
-          echo "aks_resource_group: '${{ needs.validate-environment.outputs.aks_resource_group_1 }}'"
+                  echo "aks_cluster_name: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
+        echo "aks_resource_group: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
           echo ""
           echo "🔍 Checking if values are null or empty:"
-          if [ -z "${{ needs.validate-environment.outputs.aks_cluster_name_1 }}" ]; then
-            echo "❌ aks_cluster_name is NULL/EMPTY in deploy job"
-          else
-            echo "✅ aks_cluster_name received: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
-          fi
-          
-          if [ -z "${{ needs.validate-environment.outputs.aks_resource_group_1 }}" ]; then
-            echo "❌ aks_resource_group is NULL/EMPTY in deploy job"
-          else
-            echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group_1 }}'"
-          fi
+                  if [ -z "${{ needs.validate-environment.outputs.aks_cluster_name }}" ]; then
+          echo "❌ aks_cluster_name is NULL/EMPTY in deploy job"
+        else
+          echo "✅ aks_cluster_name received: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
+        fi
+        
+        if [ -z "${{ needs.validate-environment.outputs.aks_resource_group }}" ]; then
+          echo "❌ aks_resource_group is NULL/EMPTY in deploy job"
+        else
+          echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
+        fi
 
       - name: Deploy to AKS
         uses: ./.github/actions/helm-deploy
@@ -818,8 +809,8 @@ jobs:
           image_tag: ${{ needs.setup.outputs.image_tag }}
           helm_version: ${{ needs.setup.outputs.helm_version }}
           registry: ${{ env.REGISTRY }}
-          aks_cluster_name: ${{ needs.validate-environment.outputs.aks_cluster_name_1 }}
-          aks_resource_group: ${{ needs.validate-environment.outputs.aks_resource_group_1 }}
+          aks_cluster_name: ${{ needs.validate-environment.outputs.aks_cluster_name }}
+          aks_resource_group: ${{ needs.validate-environment.outputs.aks_resource_group }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
