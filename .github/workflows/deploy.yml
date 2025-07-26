@@ -8,17 +8,21 @@ permissions:
 on:
   push:
     branches:
-      - main
-      - develop
-      - 'release/**'
+      - dev
+      - develop  # Legacy support
+      - sqe
+      - ppr
+      - 'release/**'  # Legacy support
     paths:
       - '**'
       - 'helm/**'
       - '.github/workflows/deploy.yml'
   pull_request:
     branches:
-      - main
-      - develop
+      - dev
+      - develop  # Legacy support
+      - sqe
+      - ppr
     paths:
       - '**'
       - 'helm/**'

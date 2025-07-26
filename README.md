@@ -151,7 +151,12 @@ This repository uses a branch-based approach:
 
 - **`no-keyvault-shared-github-actions`**: Shared CI/CD workflows with Spring Boot profile-based configuration
 - **`no-keyvault-my-app`**: This Spring Boot application (current branch)
-- **`main`**: Production releases
+- **Environment Branches**: Each environment has a dedicated branch:
+  - `dev`: Development environment
+  - `sqe`: System Quality Engineering environment
+  - `ppr`: Pre-Production environment
+- **`main`**: Main branch (not used for automatic deployment)
+- **Tags**: Production releases
 
 ### Workflow Integration
 
@@ -177,11 +182,13 @@ This application uses Spring Boot profiles for environment-specific configuratio
 - **Spring Profiles**: Environment-specific behavior and settings
 
 ### Automatic Deployment Strategy
-The deployment workflow provides automatic deployment based on branch/tag:
-- **Dev**: Automatic deployment from `develop` branch
-- **SQE**: Automatic deployment from `main` branch  
-- **PPR**: Automatic deployment from `release/*` branches
+The deployment workflow provides automatic deployment based on environment-specific branches/tags:
+- **Dev**: Automatic deployment from `dev` branch (also supports `develop` for legacy)
+- **SQE**: Automatic deployment from `sqe` branch  
+- **PPR**: Automatic deployment from `ppr` branch (also supports `release/*` for legacy)
 - **Production**: Automatic deployment from tags (after PPR validation)
+
+**Branch-Environment Mapping**: Each environment has its own dedicated branch with the same name, making it easy to add new environments in the future.
 
 ### Required Deployment Secrets
 The deployment workflow requires these secrets:
