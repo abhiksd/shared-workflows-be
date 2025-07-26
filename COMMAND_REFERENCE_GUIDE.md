@@ -4,6 +4,44 @@
 
 This guide provides a quick reference for all commonly used commands in the deployment pipeline. Instead of searching through extensive documentation, you can quickly find the exact command you need here.
 
+## 🚨 **Emergency Curl Commands (Quick Reference)**
+
+### **SonarQube Quick Check**
+```bash
+# Check status and quality gate
+curl -u admin:admin http://sonar-server:9000/api/system/status
+curl -u admin:admin "http://sonar-server:9000/api/qualitygates/project_status?projectKey=my-project"
+```
+
+### **Checkmarx Quick Check**
+```bash
+# Get token and check status
+curl -X POST "https://checkmarx-server/cxrestapi/auth/identity/connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=user&password=pass&grant_type=password&scope=sast_rest_api&client_id=resource_owner_client&client_secret=014DF517-39D1-4453-B7B3-9930C563627C"
+
+curl -X GET "https://checkmarx-server/cxrestapi/sast/scans/scan-id" \
+  -H "Authorization: Bearer your-token"
+```
+
+### **Application Health Quick Check**
+```bash
+# Spring Boot Actuator
+curl http://localhost:8080/actuator/health
+curl http://localhost:8080/actuator/health/readiness
+```
+
+### **GitHub API Quick Check**
+```bash
+# Check workflow status
+curl -H "Authorization: token your-token" \
+  https://api.github.com/repos/owner/repo/actions/runs
+
+# Check repository variables
+curl -H "Authorization: token your-token" \
+  https://api.github.com/repos/owner/repo/actions/variables
+```
+
 ## 📋 Quick Navigation
 
 - [🐳 Docker Commands](#-docker-commands)
@@ -15,6 +53,13 @@ This guide provides a quick reference for all commonly used commands in the depl
 - [🏗️ Maven Commands](#️-maven-commands)
 - [📊 Monitoring Commands](#-monitoring-commands)
 - [🔍 Troubleshooting Commands](#-troubleshooting-commands)
+  - [SonarQube Troubleshooting](#sonarqube-troubleshooting)
+  - [Checkmarx Troubleshooting](#checkmarx-troubleshooting)
+  - [Application Health & API Testing](#application-health-and-api-troubleshooting)
+  - [GitHub API Troubleshooting](#github-api-troubleshooting)
+  - [Azure Services Troubleshooting](#azure-services-troubleshooting)
+  - [Emergency Debugging](#emergency-debugging-commands)
+  - [Pipeline Debugging](#pipeline-debugging-workflows)
 
 ## 🐳 Docker Commands
 
@@ -597,6 +642,419 @@ helm get values my-app
 # Validate Helm templates
 helm template my-app ./helm --debug
 helm lint ./helm
+```
+
+### **SonarQube Troubleshooting**
+```bash
+# Check SonarQube server status
+curl -u admin:admin http://sonar-server:9000/api/system/status
+curl -H "Authorization: Bearer your-token" http://sonar-server:9000/api/system/status
+
+# Check SonarQube health
+curl -u admin:admin http://sonar-server:9000/api/system/health
+curl -H "Authorization: Bearer your-token" http://sonar-server:9000/api/system/health
+
+# Get project information
+curl -u admin:admin "http://sonar-server:9000/api/projects/search?q=my-project"
+curl -H "Authorization: Bearer your-token" "http://sonar-server:9000/api/projects/search?q=my-project"
+
+# Check quality gate status
+curl -u admin:admin "http://sonar-server:9000/api/qualitygates/project_status?projectKey=my-project"
+curl -H "Authorization: Bearer your-token" "http://sonar-server:9000/api/qualitygates/project_status?projectKey=my-project"
+
+# Get quality gate details
+curl -u admin:admin "http://sonar-server:9000/api/qualitygates/show?id=1"
+curl -H "Authorization: Bearer your-token" "http://sonar-server:9000/api/qualitygates/show?id=1"
+
+# Check project metrics
+curl -u admin:admin "http://sonar-server:9000/api/measures/component?component=my-project&metricKeys=coverage,bugs,vulnerabilities,code_smells"
+curl -H "Authorization: Bearer your-token" "http://sonar-server:9000/api/measures/component?component=my-project&metricKeys=coverage,bugs,vulnerabilities,code_smells"
+
+# Get analysis history
+curl -u admin:admin "http://sonar-server:9000/api/project_analyses/search?project=my-project"
+curl -H "Authorization: Bearer your-token" "http://sonar-server:9000/api/project_analyses/search?project=my-project"
+
+# Check SonarQube version and plugins
+curl -u admin:admin http://sonar-server:9000/api/system/info
+curl -u admin:admin http://sonar-server:9000/api/plugins/installed
+
+# Test webhook endpoints
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"serverUrl":"http://sonar-server:9000","taskId":"task-123","status":"SUCCESS"}' \
+  http://webhook-endpoint/sonar
+
+# Check compute engine tasks
+curl -u admin:admin "http://sonar-server:9000/api/ce/activity?component=my-project"
+curl -H "Authorization: Bearer your-token" "http://sonar-server:9000/api/ce/activity?component=my-project"
+```
+
+### **Checkmarx Troubleshooting**
+```bash
+# Check Checkmarx server status
+curl -X GET "https://checkmarx-server/cxrestapi/help/about" \
+  -H "Accept: application/json"
+
+# Authenticate and get token
+curl -X POST "https://checkmarx-server/cxrestapi/auth/identity/connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=your-username&password=your-password&grant_type=password&scope=sast_rest_api&client_id=resource_owner_client&client_secret=014DF517-39D1-4453-B7B3-9930C563627C"
+
+# Check projects (with token)
+curl -X GET "https://checkmarx-server/cxrestapi/projects" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Get project details
+curl -X GET "https://checkmarx-server/cxrestapi/projects/project-id" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Check scan status
+curl -X GET "https://checkmarx-server/cxrestapi/sast/scans/scan-id" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Get scan results
+curl -X GET "https://checkmarx-server/cxrestapi/sast/scans/scan-id/results" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Check scan statistics
+curl -X GET "https://checkmarx-server/cxrestapi/sast/scans/scan-id/resultsStatistics" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Get presets
+curl -X GET "https://checkmarx-server/cxrestapi/sast/presets" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Check teams
+curl -X GET "https://checkmarx-server/cxrestapi/auth/teams" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Accept: application/json"
+
+# Generate report
+curl -X POST "https://checkmarx-server/cxrestapi/reports/sastScan" \
+  -H "Authorization: Bearer your-access-token" \
+  -H "Content-Type: application/json" \
+  -d '{"reportType":"PDF","scanId":scan-id}'
+
+# Download report
+curl -X GET "https://checkmarx-server/cxrestapi/reports/sastScan/report-id" \
+  -H "Authorization: Bearer your-access-token" \
+  -o "checkmarx-report.pdf"
+
+# Check server health
+curl -X GET "https://checkmarx-server/cxrestapi/system/version" \
+  -H "Accept: application/json"
+```
+
+### **Application Health and API Troubleshooting**
+```bash
+# Spring Boot Actuator endpoints
+curl http://localhost:8080/actuator/health
+curl http://localhost:8080/actuator/health/readiness
+curl http://localhost:8080/actuator/health/liveness
+curl http://localhost:8080/actuator/info
+curl http://localhost:8080/actuator/metrics
+curl http://localhost:8080/actuator/env
+curl http://localhost:8080/actuator/configprops
+
+# Check specific metrics
+curl http://localhost:8080/actuator/metrics/jvm.memory.used
+curl http://localhost:8080/actuator/metrics/http.server.requests
+
+# Application endpoints testing
+curl -X GET http://localhost:8080/api/health \
+  -H "Accept: application/json"
+
+curl -X POST http://localhost:8080/api/test \
+  -H "Content-Type: application/json" \
+  -d '{"test":"data"}'
+
+# Test with authentication
+curl -X GET http://localhost:8080/api/secured \
+  -H "Authorization: Bearer your-jwt-token" \
+  -H "Accept: application/json"
+
+# Database connectivity test (if exposed)
+curl http://localhost:8080/actuator/health/db
+
+# Check application logs endpoint (if available)
+curl http://localhost:8080/actuator/loggers
+curl http://localhost:8080/actuator/logfile
+```
+
+### **GitHub API Troubleshooting**
+```bash
+# Check GitHub API rate limits
+curl -H "Authorization: token your-github-token" \
+  https://api.github.com/rate_limit
+
+# Check workflow runs
+curl -H "Authorization: token your-github-token" \
+  https://api.github.com/repos/owner/repo/actions/runs
+
+# Get specific workflow run
+curl -H "Authorization: token your-github-token" \
+  https://api.github.com/repos/owner/repo/actions/runs/run-id
+
+# Check workflow run logs
+curl -L -H "Authorization: token your-github-token" \
+  https://api.github.com/repos/owner/repo/actions/runs/run-id/logs
+
+# Check repository variables
+curl -H "Authorization: token your-github-token" \
+  https://api.github.com/repos/owner/repo/actions/variables
+
+# Check repository secrets (names only)
+curl -H "Authorization: token your-github-token" \
+  https://api.github.com/repos/owner/repo/actions/secrets
+
+# Check workflow status
+curl -H "Authorization: token your-github-token" \
+  https://api.github.com/repos/owner/repo/actions/workflows
+
+# Trigger workflow dispatch
+curl -X POST \
+  -H "Authorization: token your-github-token" \
+  -H "Accept: application/vnd.github.v3+json" \
+  https://api.github.com/repos/owner/repo/actions/workflows/deploy.yml/dispatches \
+  -d '{"ref":"main","inputs":{"environment":"dev"}}'
+```
+
+### **Azure Services Troubleshooting**
+```bash
+# Azure Resource Manager API
+az rest --method GET --url "https://management.azure.com/subscriptions/subscription-id/resourceGroups/rg-name/providers/Microsoft.ContainerService/managedClusters/cluster-name?api-version=2021-05-01"
+
+# Check AKS cluster health
+az aks show --resource-group rg-name --name cluster-name --query "powerState"
+
+# Check ACR health
+az acr check-health --name registry-name
+
+# Test ACR connectivity
+curl -u username:password https://registry-name.azurecr.io/v2/_catalog
+
+# Check Azure KeyVault (if using)
+az keyvault show --name vault-name
+curl -H "Authorization: Bearer azure-token" \
+  "https://vault-name.vault.azure.net/secrets?api-version=7.3"
+
+# Azure Monitor/Application Insights
+curl -X GET \
+  "https://api.applicationinsights.io/v1/apps/app-id/query" \
+  -H "X-API-Key: api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"requests | take 10"}'
+```
+
+### **Database Connectivity Testing**
+```bash
+# PostgreSQL connection test
+curl -X POST http://localhost:8080/actuator/health/db
+
+# Test database endpoint (if exposed)
+curl -X GET http://localhost:8080/api/db/health \
+  -H "Accept: application/json"
+
+# Redis connection test
+curl http://localhost:8080/actuator/health/redis
+
+# Test Redis directly (if accessible)
+redis-cli -h redis-host -p 6379 ping
+```
+
+### **Load Balancer and Ingress Testing**
+```bash
+# Test ingress endpoints
+curl -H "Host: my-app.example.com" http://ingress-ip/
+curl -k https://my-app.example.com/health
+
+# Test with different headers
+curl -H "Host: my-app.example.com" \
+     -H "X-Forwarded-Proto: https" \
+     http://ingress-ip/api/test
+
+# Check SSL certificate
+curl -vI https://my-app.example.com 2>&1 | grep -A 10 "Server certificate"
+openssl s_client -connect my-app.example.com:443 -servername my-app.example.com
+
+# Test load balancer health checks
+curl http://load-balancer-ip/health
+curl -I http://load-balancer-ip/ping
+```
+
+### **Performance Testing**
+```bash
+# Simple load testing with curl
+for i in {1..100}; do
+  curl -w "@curl-format.txt" -o /dev/null -s http://localhost:8080/api/test
+done
+
+# Create curl-format.txt for timing
+echo "     time_namelookup:  %{time_namelookup}s
+        time_connect:  %{time_connect}s
+     time_appconnect:  %{time_appconnect}s
+    time_pretransfer:  %{time_pretransfer}s
+       time_redirect:  %{time_redirect}s
+  time_starttransfer:  %{time_starttransfer}s
+                     ----------
+          time_total:  %{time_total}s" > curl-format.txt
+
+# Concurrent requests testing
+seq 1 10 | xargs -n1 -P10 curl -s http://localhost:8080/api/test
+
+# HTTP/2 testing
+curl --http2 -I https://my-app.example.com/
+```
+
+### **Workflow-Specific Troubleshooting**
+```bash
+# Check GitHub workflow status via API
+curl -H "Authorization: token $GITHUB_TOKEN" \
+  https://api.github.com/repos/owner/repo/actions/runs | jq '.workflow_runs[0]'
+
+# Check SonarQube quality gate from pipeline
+curl -u "$SONAR_TOKEN:" \
+  "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY" | jq '.'
+
+# Check Checkmarx scan status from pipeline
+curl -X GET "$CHECKMARX_SERVER/cxrestapi/sast/scans/$SCAN_ID" \
+  -H "Authorization: Bearer $CX_TOKEN" | jq '.status'
+
+# Verify Azure AKS cluster connectivity from pipeline
+az aks get-credentials --resource-group $AKS_RESOURCE_GROUP --name $AKS_CLUSTER_NAME --overwrite-existing
+kubectl cluster-info
+
+# Test ACR authentication from pipeline
+echo $ACR_PASSWORD | docker login $ACR_LOGIN_SERVER --username $ACR_USERNAME --password-stdin
+
+# Check repository variables via API
+curl -H "Authorization: token $GITHUB_TOKEN" \
+  https://api.github.com/repos/owner/repo/actions/variables | jq '.variables'
+
+# Validate emergency bypass status
+curl -H "Authorization: token $GITHUB_TOKEN" \
+  https://api.github.com/repos/owner/repo/actions/variables/EMERGENCY_BYPASS_SONAR
+
+# Test Helm deployment dry run from pipeline
+helm template my-app ./helm --values ./helm/values-$ENVIRONMENT.yaml --debug
+
+# Check pod status after deployment
+kubectl get pods -l app=my-app -o wide
+kubectl describe pod $(kubectl get pods -l app=my-app -o jsonpath='{.items[0].metadata.name}')
+
+# Verify service endpoints after deployment
+kubectl get service my-app
+kubectl describe service my-app
+curl http://$(kubectl get service my-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}')/health
+
+# Check ingress after deployment
+kubectl get ingress my-app
+curl -H "Host: my-app.domain.com" http://$(kubectl get ingress my-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}')/health
+```
+
+### **Emergency Debugging Commands**
+```bash
+# Quick health check of all pipeline components
+echo "=== PIPELINE HEALTH CHECK ==="
+
+# 1. Check SonarQube
+echo "1. SonarQube Status:"
+curl -s -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/system/status" | jq '.status' || echo "❌ SonarQube unreachable"
+
+# 2. Check Checkmarx
+echo "2. Checkmarx Status:"
+curl -s -X GET "$CHECKMARX_SERVER/cxrestapi/help/about" | jq '.version' || echo "❌ Checkmarx unreachable"
+
+# 3. Check AKS cluster
+echo "3. AKS Cluster Status:"
+az aks show --resource-group $AKS_RESOURCE_GROUP --name $AKS_CLUSTER_NAME --query "powerState.code" -o tsv || echo "❌ AKS unreachable"
+
+# 4. Check ACR
+echo "4. ACR Status:"
+az acr check-health --name $ACR_NAME --query "status" -o tsv || echo "❌ ACR unreachable"
+
+# 5. Check GitHub API
+echo "5. GitHub API Status:"
+curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit | jq '.rate.remaining' || echo "❌ GitHub API unreachable"
+
+# Emergency deployment status check
+echo "=== EMERGENCY DEPLOYMENT STATUS ==="
+kubectl get pods -l app=my-app --field-selector=status.phase=Running
+kubectl get pods -l app=my-app --field-selector=status.phase!=Running
+kubectl get events --sort-by='.lastTimestamp' | grep my-app | tail -10
+
+# Quick rollback command
+echo "=== QUICK ROLLBACK ==="
+helm rollback my-app
+kubectl rollout status deployment/my-app --timeout=300s
+```
+
+### **Pipeline Debugging Workflows**
+```bash
+# Debug failed SonarQube scan
+echo "=== SONARQUBE DEBUG ==="
+echo "Project Key: $PROJECT_KEY"
+echo "SonarQube URL: $SONAR_HOST_URL"
+
+# Check if project exists
+curl -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/projects/search?q=$PROJECT_KEY" | jq '.components'
+
+# Check latest analysis
+curl -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/project_analyses/search?project=$PROJECT_KEY" | jq '.analyses[0]'
+
+# Check compute engine tasks
+curl -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/ce/activity?component=$PROJECT_KEY" | jq '.tasks[0]'
+
+# Debug failed Checkmarx scan
+echo "=== CHECKMARX DEBUG ==="
+echo "Checkmarx Server: $CHECKMARX_SERVER"
+echo "Project ID: $CX_PROJECT_ID"
+
+# Get authentication token
+CX_TOKEN=$(curl -s -X POST "$CHECKMARX_SERVER/cxrestapi/auth/identity/connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=$CX_USERNAME&password=$CX_PASSWORD&grant_type=password&scope=sast_rest_api&client_id=resource_owner_client&client_secret=014DF517-39D1-4453-B7B3-9930C563627C" \
+  | jq -r '.access_token')
+
+# Check project status
+curl -s -X GET "$CHECKMARX_SERVER/cxrestapi/projects/$CX_PROJECT_ID" \
+  -H "Authorization: Bearer $CX_TOKEN" | jq '.'
+
+# Check latest scan
+curl -s -X GET "$CHECKMARX_SERVER/cxrestapi/sast/scans?projectId=$CX_PROJECT_ID&last=1" \
+  -H "Authorization: Bearer $CX_TOKEN" | jq '.[0]'
+
+# Debug failed AKS deployment
+echo "=== AKS DEPLOYMENT DEBUG ==="
+echo "Cluster: $AKS_CLUSTER_NAME"
+echo "Resource Group: $AKS_RESOURCE_GROUP"
+echo "Namespace: $KUBE_NAMESPACE"
+
+# Check cluster connectivity
+kubectl cluster-info || echo "❌ Cannot connect to AKS cluster"
+
+# Check namespace
+kubectl get namespace $KUBE_NAMESPACE || echo "❌ Namespace does not exist"
+
+# Check recent events
+kubectl get events --namespace=$KUBE_NAMESPACE --sort-by='.lastTimestamp' | tail -20
+
+# Check deployment status
+kubectl get deployment my-app --namespace=$KUBE_NAMESPACE
+kubectl describe deployment my-app --namespace=$KUBE_NAMESPACE
+
+# Check pods
+kubectl get pods -l app=my-app --namespace=$KUBE_NAMESPACE
+kubectl describe pod $(kubectl get pods -l app=my-app --namespace=$KUBE_NAMESPACE -o jsonpath='{.items[0].metadata.name}') --namespace=$KUBE_NAMESPACE
+
+# Check services
+kubectl get service my-app --namespace=$KUBE_NAMESPACE
+kubectl describe service my-app --namespace=$KUBE_NAMESPACE
 ```
 
 ## 🚀 Deployment Workflow Commands
