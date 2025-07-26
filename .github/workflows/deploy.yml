@@ -56,6 +56,11 @@ on:
         required: false
         type: string
         default: 'Manual deployment via workflow dispatch'
+      emergency_deployment:
+        description: '⚠️ EMERGENCY: Required for PROD manual override (authorized users only)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   # Deploy Java Backend 1 - User Management Service
@@ -72,4 +77,5 @@ jobs:
       override_branch_validation: ${{ github.event.inputs.override_branch_validation == 'true' }}
       custom_image_tag: ${{ github.event.inputs.custom_image_tag }}
       deploy_notes: ${{ github.event.inputs.deploy_notes }}
+      emergency_deployment: ${{ github.event.inputs.emergency_deployment == 'true' }}
     secrets: inherit
