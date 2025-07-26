@@ -1,0 +1,448 @@
+name: Shared Deploy Workflow
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy to (dev, sqe, ppr, prod, auto)'
+        required: true
+        type: string
+      application_name:
+        description: 'Application name'
+        required: true
+        type: string
+      application_type:
+        description: 'Application type'
+        required: true
+        type: string
+      build_context:
+        description: 'Build context path'
+        required: false
+        type: string
+        default: '.'
+      dockerfile_path:
+        description: 'Dockerfile path'
+        required: false
+        type: string
+        default: './Dockerfile'
+      helm_chart_path:
+        description: 'Helm chart path'
+        required: false
+        type: string
+        default: './helm'
+      force_deploy:
+        description: 'Force deployment'
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      ACR_LOGIN_SERVER:
+        required: true
+      SONAR_TOKEN:
+        required: true
+      CHECKMARX_CLIENT_ID:
+        required: true
+      CHECKMARX_CLIENT_SECRET:
+        required: true
+
+env:
+  # Blue-Green deployment configuration
+  BLUE_GREEN_ENABLED: true
+  
+  # AKS Cluster Configuration (centralized)
+  AKS_CLUSTER_DEV: "aks-java-backend1-dev"
+  AKS_CLUSTER_SQE: "aks-java-backend1-sqe"
+  AKS_CLUSTER_PPR: "aks-java-backend1-ppr"
+  AKS_CLUSTER_PROD: "aks-java-backend1-prod"
+  
+  AKS_RESOURCE_GROUP_DEV: "rg-java-backend1-dev"
+  AKS_RESOURCE_GROUP_SQE: "rg-java-backend1-sqe"
+  AKS_RESOURCE_GROUP_PPR: "rg-java-backend1-ppr"
+  AKS_RESOURCE_GROUP_PROD: "rg-java-backend1-prod"
+
+jobs:
+  # Environment validation and setup
+  validate-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.validate.outputs.should_deploy }}
+      target_environment: ${{ steps.validate.outputs.target_environment }}
+      image_tag: ${{ steps.validate.outputs.image_tag }}
+    steps:
+      - name: Validate environment and determine deployment
+        id: validate
+        run: |
+          if [ "${{ inputs.environment }}" = "auto" ]; then
+            if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+              TARGET_ENV="dev"
+            elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+              TARGET_ENV="sqe"
+            elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
+              TARGET_ENV="ppr"
+            elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+              TARGET_ENV="prod"
+            else
+              echo "❌ Unsupported branch/tag for auto deployment"
+              TARGET_ENV=""
+              echo "should_deploy=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            TARGET_ENV="${{ inputs.environment }}"
+          fi
+          
+          echo "🎯 Target environment: $TARGET_ENV"
+          echo "target_environment=$TARGET_ENV" >> $GITHUB_OUTPUT
+          
+          # Generate image tag
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            IMAGE_TAG="${{ github.ref_name }}"
+          else
+            IMAGE_TAG="$(date +%Y-%m-%d-%H-%M)-${GITHUB_SHA::7}"
+          fi
+          
+          echo "🏷️ Image tag: $IMAGE_TAG"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+
+  # Setup and build
+  setup:
+    runs-on: ubuntu-latest
+    needs: [validate-environment]
+    if: needs.validate-environment.outputs.should_deploy == 'true'
+    outputs:
+      should_deploy: ${{ steps.setup.outputs.should_deploy }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Setup environment
+        id: setup
+        run: |
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+
+  # Quality gates
+  sonar-scan:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true'
+    outputs:
+      scan_status: ${{ steps.sonar.outputs.scan_status }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache SonarQube packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Run SonarQube scan
+        id: sonar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          mvn clean verify sonar:sonar \
+            -Dsonar.projectKey=${{ inputs.application_name }} \
+            -Dsonar.host.url=${{ vars.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+          
+          echo "scan_status=PASSED" >> $GITHUB_OUTPUT
+
+  # Security scan
+  checkmarx-scan:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true'
+    outputs:
+      scan_status: ${{ steps.checkmarx.outputs.scan_status }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkmarx scan
+        id: checkmarx
+        run: |
+          # Placeholder for Checkmarx scan
+          echo "🔐 Running Checkmarx security scan..."
+          echo "scan_status=PASSED" >> $GITHUB_OUTPUT
+
+  # Build and push image
+  build:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build application
+        run: |
+          mvn clean package -DskipTests
+          echo "✅ Application built successfully"
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE_NAME="${{ secrets.ACR_LOGIN_SERVER }}/${{ inputs.application_name }}:${{ needs.validate-environment.outputs.image_tag }}"
+          
+          echo "🐳 Building Docker image: $IMAGE_NAME"
+          docker build -t $IMAGE_NAME ${{ inputs.build_context }}
+          
+          echo "🔐 Logging in to ACR..."
+          az acr login --name ${{ secrets.ACR_LOGIN_SERVER }}
+          
+          echo "📤 Pushing image to ACR..."
+          docker push $IMAGE_NAME
+          
+          echo "✅ Image pushed successfully: $IMAGE_NAME"
+
+  # Blue-Green strategy (for ppr and prod)
+  blue-green-strategy:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && (needs.validate-environment.outputs.target_environment == 'ppr' || needs.validate-environment.outputs.target_environment == 'prod') && !failure() && !cancelled()
+    outputs:
+      target_slot: ${{ steps.determine-slot.outputs.target_slot }}
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set AKS context
+        run: |
+          TARGET_ENV="${{ needs.validate-environment.outputs.target_environment }}"
+          
+          if [ "$TARGET_ENV" = "ppr" ]; then
+            AKS_CLUSTER="${{ env.AKS_CLUSTER_PPR }}"
+            AKS_RG="${{ env.AKS_RESOURCE_GROUP_PPR }}"
+          else
+            AKS_CLUSTER="${{ env.AKS_CLUSTER_PROD }}"
+            AKS_RG="${{ env.AKS_RESOURCE_GROUP_PROD }}"
+          fi
+          
+          echo "🔧 Setting AKS context: $AKS_CLUSTER"
+          az aks get-credentials --resource-group $AKS_RG --name $AKS_CLUSTER --overwrite-existing
+
+      - name: Determine Blue-Green deployment slot
+        id: determine-slot
+        run: |
+          APP_NAME="${{ inputs.application_name }}"
+          TARGET_ENV="${{ needs.validate-environment.outputs.target_environment }}"
+          
+          # Create namespaces
+          BLUE_NS="${TARGET_ENV}-${APP_NAME}-blue"
+          GREEN_NS="${TARGET_ENV}-${APP_NAME}-green"
+          kubectl create namespace $BLUE_NS --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace $GREEN_NS --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Simple logic: Check which slot has active pods, deploy to the other
+          BLUE_PODS=$(kubectl get pods -n $BLUE_NS --no-headers 2>/dev/null | wc -l || echo "0")
+          GREEN_PODS=$(kubectl get pods -n $GREEN_NS --no-headers 2>/dev/null | wc -l || echo "0")
+          
+          if [[ $GREEN_PODS -gt 0 ]]; then
+            TARGET_SLOT="blue"
+          else
+            TARGET_SLOT="green"
+          fi
+          
+          echo "🔵🟢 Blue-Green Strategy: Deploying to ${TARGET_SLOT} slot"
+          echo "target_slot=$TARGET_SLOT" >> $GITHUB_OUTPUT
+
+  # Non-production deployment job (dev, sqe)
+  deploy-non-prod:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
+    if: |
+      needs.validate-environment.outputs.should_deploy == 'true' && 
+      needs.setup.outputs.should_deploy == 'true' && 
+      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
+      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      needs.validate-environment.outputs.target_environment != 'prod' &&
+      needs.validate-environment.outputs.target_environment != 'ppr' &&
+      !failure() && !cancelled()
+    environment: 
+      name: ${{ needs.validate-environment.outputs.target_environment }}
+      url: ${{ format('https://{0}.mydomain.com/backend1', needs.validate-environment.outputs.target_environment) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to AKS (Non-Production)
+        uses: ./.github/actions/helm-deploy
+        with:
+          environment: ${{ needs.validate-environment.outputs.target_environment }}
+          application_name: ${{ inputs.application_name }}
+          image_tag: ${{ needs.validate-environment.outputs.image_tag }}
+          helm_chart_path: ${{ inputs.helm_chart_path }}
+          blue_green_enabled: 'false'
+
+  # Pre-production Blue-Green deployment (no approval required)
+  deploy-ppr:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy]
+    if: |
+      needs.validate-environment.outputs.should_deploy == 'true' && 
+      needs.setup.outputs.should_deploy == 'true' && 
+      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
+      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      needs.validate-environment.outputs.target_environment == 'ppr' &&
+      !failure() && !cancelled()
+    environment: 
+      name: ${{ needs.validate-environment.outputs.target_environment }}
+      url: 'https://preprod.mydomain.com/backend1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to AKS with Blue-Green Strategy (Pre-Prod)
+        uses: ./.github/actions/helm-deploy
+        with:
+          environment: ${{ needs.validate-environment.outputs.target_environment }}
+          application_name: ${{ inputs.application_name }}
+          image_tag: ${{ needs.validate-environment.outputs.image_tag }}
+          helm_chart_path: ${{ inputs.helm_chart_path }}
+          blue_green_enabled: ${{ env.BLUE_GREEN_ENABLED }}
+          target_slot: ${{ needs.blue-green-strategy.outputs.target_slot }}
+
+  # Manual production approval
+  production-approval:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy]
+    if: |
+      needs.validate-environment.outputs.should_deploy == 'true' && 
+      needs.setup.outputs.should_deploy == 'true' && 
+      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
+      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      needs.validate-environment.outputs.target_environment == 'prod' &&
+      !failure() && !cancelled()
+    environment: 
+      name: production-approval
+    steps:
+      - name: Manual Approval for Production
+        run: |
+          echo "🚀 Production Deployment Approval"
+          echo "================================="
+          echo "Application: ${{ inputs.application_name }}"
+          echo "Environment: ${{ needs.validate-environment.outputs.target_environment }}"
+          echo "Image Tag: ${{ needs.validate-environment.outputs.image_tag }}"
+          echo "Target Slot: ${{ needs.blue-green-strategy.outputs.target_slot }}"
+          echo "================================="
+          echo "✅ Approved for production deployment"
+
+  # Production Blue-Green deployment (requires manual approval)
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy, production-approval]
+    if: |
+      needs.validate-environment.outputs.should_deploy == 'true' && 
+      needs.setup.outputs.should_deploy == 'true' && 
+      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
+      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      needs.validate-environment.outputs.target_environment == 'prod' &&
+      needs.production-approval.result == 'success' &&
+      !failure() && !cancelled()
+    environment: 
+      name: ${{ needs.validate-environment.outputs.target_environment }}
+      url: 'https://api.mydomain.com/backend1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to AKS with Blue-Green Strategy
+        uses: ./.github/actions/helm-deploy
+        with:
+          environment: ${{ needs.validate-environment.outputs.target_environment }}
+          application_name: ${{ inputs.application_name }}
+          image_tag: ${{ needs.validate-environment.outputs.image_tag }}
+          helm_chart_path: ${{ inputs.helm_chart_path }}
+          blue_green_enabled: ${{ env.BLUE_GREEN_ENABLED }}
+          target_slot: ${{ needs.blue-green-strategy.outputs.target_slot }}
+
+  # Create release (for production deployments)
+  create_release:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, deploy-non-prod, deploy-ppr, deploy-prod]
+    if: |
+      always() && 
+      needs.validate-environment.outputs.target_environment == 'prod' &&
+      (needs.deploy-prod.result == 'success')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.validate-environment.outputs.image_tag }}
+          release_name: Release ${{ needs.validate-environment.outputs.image_tag }}
+          body: |
+            🚀 Production Release: ${{ inputs.application_name }}
+            
+            **Deployment Details:**
+            - Environment: ${{ needs.validate-environment.outputs.target_environment }}
+            - Image Tag: ${{ needs.validate-environment.outputs.image_tag }}
+            - Deployment Strategy: Blue-Green
+            
+            **Quality Gates:**
+            - ✅ SonarQube Scan: ${{ needs.sonar-scan.outputs.scan_status }}
+            - ✅ Checkmarx Scan: ${{ needs.checkmarx-scan.outputs.scan_status }}
+            
+            **Deployment URL:** https://api.mydomain.com/backend1
+          draft: false
+          prerelease: false

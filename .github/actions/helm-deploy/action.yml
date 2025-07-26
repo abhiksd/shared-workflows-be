@@ -1,0 +1,190 @@
+name: 'Helm Deploy Action'
+description: 'Deploy application using Helm with Blue-Green support'
+
+inputs:
+  environment:
+    description: 'Target environment'
+    required: true
+  application_name:
+    description: 'Application name'
+    required: true
+  image_tag:
+    description: 'Docker image tag'
+    required: true
+  helm_chart_path:
+    description: 'Path to Helm chart'
+    required: true
+  blue_green_enabled:
+    description: 'Enable Blue-Green deployment'
+    required: false
+    default: 'false'
+  target_slot:
+    description: 'Target deployment slot (blue/green)'
+    required: false
+    default: 'blue'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Set environment variables
+      shell: bash
+      run: |
+        echo "ENVIRONMENT=${{ inputs.environment }}" >> $GITHUB_ENV
+        echo "APPLICATION_NAME=${{ inputs.application_name }}" >> $GITHUB_ENV
+        echo "IMAGE_TAG=${{ inputs.image_tag }}" >> $GITHUB_ENV
+        echo "BLUE_GREEN_ENABLED=${{ inputs.blue_green_enabled }}" >> $GITHUB_ENV
+        echo "TARGET_SLOT=${{ inputs.target_slot }}" >> $GITHUB_ENV
+
+    - name: Determine namespace
+      id: namespace
+      shell: bash
+      run: |
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && ("${{ inputs.environment }}" == "ppr" || "${{ inputs.environment }}" == "prod") ]]; then
+          NAMESPACE="${{ inputs.environment }}-${{ inputs.application_name }}-${{ inputs.target_slot }}"
+        else
+          NAMESPACE="default"
+        fi
+        echo "namespace=$NAMESPACE" >> $GITHUB_OUTPUT
+        echo "Using namespace: $NAMESPACE"
+
+    - name: Set AKS context
+      shell: bash
+      run: |
+        case "${{ inputs.environment }}" in
+          "dev")
+            AKS_CLUSTER="aks-java-backend1-dev"
+            AKS_RG="rg-java-backend1-dev"
+            ;;
+          "sqe")
+            AKS_CLUSTER="aks-java-backend1-sqe"
+            AKS_RG="rg-java-backend1-sqe"
+            ;;
+          "ppr")
+            AKS_CLUSTER="aks-java-backend1-ppr"
+            AKS_RG="rg-java-backend1-ppr"
+            ;;
+          "prod")
+            AKS_CLUSTER="aks-java-backend1-prod"
+            AKS_RG="rg-java-backend1-prod"
+            ;;
+          *)
+            echo "❌ Unsupported environment: ${{ inputs.environment }}"
+            exit 1
+            ;;
+        esac
+        
+        echo "🔧 Setting AKS context: $AKS_CLUSTER"
+        az aks get-credentials --resource-group $AKS_RG --name $AKS_CLUSTER --overwrite-existing
+
+    - name: Create namespace
+      shell: bash
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        echo "📦 Creating namespace: $NAMESPACE"
+        kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Add labels for Blue-Green if enabled
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && ("${{ inputs.environment }}" == "ppr" || "${{ inputs.environment }}" == "prod") ]]; then
+          kubectl label namespace $NAMESPACE deployment-slot=${{ inputs.target_slot }} --overwrite
+          kubectl label namespace $NAMESPACE environment=${{ inputs.environment }} --overwrite
+        fi
+
+    - name: Deploy with Helm
+      shell: bash
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        
+        # Get ACR login server from environment or use default
+        if [ -z "$ACR_LOGIN_SERVER" ]; then
+          echo "⚠️ ACR_LOGIN_SERVER not set, using default"
+          ACR_LOGIN_SERVER="your-acr.azurecr.io"
+        fi
+        
+        IMAGE_FULL_PATH="${ACR_LOGIN_SERVER}/${{ inputs.application_name }}:${{ inputs.image_tag }}"
+        
+        echo "🚀 Deploying with Helm..."
+        echo "  Environment: ${{ inputs.environment }}"
+        echo "  Namespace: $NAMESPACE"
+        echo "  Image: $IMAGE_FULL_PATH"
+        echo "  Blue-Green: ${{ inputs.blue_green_enabled }}"
+        echo "  Target Slot: ${{ inputs.target_slot }}"
+        
+        # Prepare Helm values
+        helm upgrade --install ${{ inputs.application_name }} ${{ inputs.helm_chart_path }} \
+          --namespace $NAMESPACE \
+          --create-namespace \
+          --values ${{ inputs.helm_chart_path }}/values-${{ inputs.environment }}.yaml \
+          --set global.environment=${{ inputs.environment }} \
+          --set global.blueGreenEnabled=${{ inputs.blue_green_enabled }} \
+          --set global.deploymentSlot=${{ inputs.target_slot }} \
+          --set image.repository="${ACR_LOGIN_SERVER}/${{ inputs.application_name }}" \
+          --set image.tag=${{ inputs.image_tag }} \
+          --wait --timeout=600s
+
+    - name: Verify deployment
+      shell: bash
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        
+        echo "✅ Verifying deployment in namespace: $NAMESPACE"
+        
+        # Check deployment status
+        kubectl rollout status deployment/${{ inputs.application_name }} -n $NAMESPACE --timeout=300s
+        
+        # Check pod health
+        kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=${{ inputs.application_name }}
+        
+        # Check service
+        kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=${{ inputs.application_name }}
+
+    - name: Blue-Green traffic switching
+      if: inputs.blue_green_enabled == 'true' && (inputs.environment == 'ppr' || inputs.environment == 'prod')
+      shell: bash
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        APP_NAME="${{ inputs.application_name }}"
+        TARGET_SLOT="${{ inputs.target_slot }}"
+        
+        echo "🔵🟢 Blue-Green traffic switching to ${TARGET_SLOT} slot..."
+        echo "   - New deployment namespace: ${NAMESPACE}"
+        
+        ENV="${{ inputs.environment }}"
+        if [[ "$ENV" == "ppr" ]]; then
+          INGRESS_HOST="preprod.mydomain.com"
+        else
+          INGRESS_HOST="api.mydomain.com"
+        fi
+        
+        kubectl patch ingress ${APP_NAME}-ingress -n default --type='merge' \
+          -p='{"spec":{"rules":[{"host":"'${INGRESS_HOST}'","http":{"paths":[{"path":"/(backend1/|$)(.*)","pathType":"ImplementationSpecific","backend":{"service":{"name":"'${APP_NAME}'","namespace":"'${NAMESPACE}'","port":{"number":8080}}}}]}}]}}'
+        
+        # Update active slot label
+        kubectl label ingress ${APP_NAME}-ingress -n default active-slot=${TARGET_SLOT} --overwrite
+        
+        echo "✅ Traffic switched to ${TARGET_SLOT} deployment"
+
+    - name: Health check post-deployment
+      shell: bash
+      run: |
+        NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+        
+        echo "🔍 Running post-deployment health checks..."
+        
+        # Wait for pods to be ready
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=${{ inputs.application_name }} -n $NAMESPACE --timeout=300s
+        
+        # Test health endpoint
+        echo "Testing health endpoint..."
+        if kubectl exec -n $NAMESPACE deployment/${{ inputs.application_name }} -- curl -f http://localhost:8080/backend1/actuator/health; then
+          echo "✅ Health check passed"
+        else
+          echo "❌ Health check failed"
+          exit 1
+        fi
+        
+        echo "✅ Deployment completed successfully"
