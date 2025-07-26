@@ -373,7 +373,7 @@ jobs:
   blue-green-strategy:
     runs-on: ubuntu-latest
     needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && needs.validate-environment.outputs.target_environment == 'prod' && !failure() && !cancelled()
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && needs.sonar-scan.outputs.scan_status == 'PASSED' && needs.checkmarx-scan.outputs.scan_status == 'PASSED' && (needs.validate-environment.outputs.target_environment == 'ppr' || needs.validate-environment.outputs.target_environment == 'prod') && !failure() && !cancelled()
     outputs:
       target_slot: ${{ steps.determine-slot.outputs.target_slot }}
     steps:
@@ -419,7 +419,7 @@ jobs:
           echo "🔵🟢 Blue-Green Strategy: Deploying to ${TARGET_SLOT} slot"
           echo "target_slot=$TARGET_SLOT" >> $GITHUB_OUTPUT
 
-  # Production approval gate - requires manual approval for prod deployments
+  # Production approval gate - requires manual approval for prod deployments only
   production-approval:
     runs-on: ubuntu-latest
     needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy]
@@ -487,7 +487,46 @@ jobs:
           blue_green_enabled: 'false'
           deployment_strategy: 'rolling'
 
-  # Production deployment job with Blue-Green strategy
+  # Pre-production Blue-Green deployment (no approval required)
+  deploy-ppr:
+    runs-on: ubuntu-latest
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy]
+    if: |
+      needs.validate-environment.outputs.should_deploy == 'true' && 
+      needs.setup.outputs.should_deploy == 'true' && 
+      needs.sonar-scan.outputs.scan_status == 'PASSED' && 
+      needs.checkmarx-scan.outputs.scan_status == 'PASSED' && 
+      needs.validate-environment.outputs.target_environment == 'ppr' &&
+      !failure() && !cancelled()
+
+    environment: 
+      name: ${{ needs.validate-environment.outputs.target_environment }}
+      url: 'https://your-ppr-app-url.com'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to AKS with Blue-Green Strategy (Pre-Prod)
+        uses: ./.github/actions/helm-deploy
+        with:
+          environment: ${{ needs.validate-environment.outputs.target_environment }}
+          application_name: ${{ inputs.application_name }}
+          application_type: ${{ inputs.application_type }}
+          helm_chart_path: ${{ inputs.helm_chart_path }}
+          image_tag: ${{ needs.setup.outputs.image_tag }}
+          helm_version: ${{ needs.setup.outputs.helm_version }}
+          registry: ${{ env.REGISTRY }}
+          aks_cluster_name: ${{ needs.validate-environment.outputs.aks_cluster_name_1 }}
+          aks_resource_group: ${{ needs.validate-environment.outputs.aks_resource_group_1 }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          keyvault_name: ${{ secrets.KEYVAULT_NAME }}
+          # Blue-Green deployment parameters for pre-production
+          blue_green_enabled: ${{ env.BLUE_GREEN_ENABLED }}
+          target_slot: ${{ needs.blue-green-strategy.outputs.target_slot }}
+
+  # Production Blue-Green deployment (requires manual approval)
   deploy-prod:
     runs-on: ubuntu-latest
     needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, blue-green-strategy, production-approval]
@@ -529,7 +568,7 @@ jobs:
 
   create_release:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, deploy-non-prod, deploy-prod]
+    needs: [validate-environment, setup, deploy-non-prod, deploy-ppr, deploy-prod]
     if: |
       always() &&
       needs.validate-environment.outputs.should_deploy == 'true' && 

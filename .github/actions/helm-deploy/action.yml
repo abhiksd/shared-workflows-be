@@ -286,7 +286,7 @@ runs:
     - name: Setup Kubernetes namespace with enhanced labeling
       run: |
         # Determine namespace based on deployment strategy
-        if [[ "${{ inputs.blue_green_enabled }}" == "true" && "${{ inputs.environment }}" == "prod" ]]; then
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && ("${{ inputs.environment }}" == "ppr" || "${{ inputs.environment }}" == "prod") ]]; then
           NAMESPACE="${{ inputs.environment }}-${{ inputs.application_name }}-${{ inputs.target_slot }}"
           echo "🔵🟢 Blue-Green deployment enabled - using slot-specific namespace"
           echo "   - Current active slot: ${{ inputs.current_slot }}"
@@ -315,7 +315,7 @@ runs:
         kubectl label namespace ${NAMESPACE} deployment-method=helm --overwrite
         
         # Add Blue-Green specific labels if enabled
-        if [[ "${{ inputs.blue_green_enabled }}" == "true" && "${{ inputs.environment }}" == "prod" ]]; then
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && ("${{ inputs.environment }}" == "ppr" || "${{ inputs.environment }}" == "prod") ]]; then
           kubectl label namespace ${NAMESPACE} deployment-slot=${{ inputs.target_slot }} --overwrite
         fi
         
@@ -370,7 +370,7 @@ runs:
         EOF
         
         # Add Blue-Green specific values if enabled
-        if [[ "${{ inputs.blue_green_enabled }}" == "true" && "${{ inputs.environment }}" == "prod" ]]; then
+        if [[ "${{ inputs.blue_green_enabled }}" == "true" && ("${{ inputs.environment }}" == "ppr" || "${{ inputs.environment }}" == "prod") ]]; then
           cat >> ${RUNTIME_VALUES_FILE} << EOF
           blueGreenEnabled: true
           deploymentSlot: "${{ inputs.target_slot }}"
@@ -605,7 +605,7 @@ runs:
       shell: bash
 
     - name: Blue-Green traffic switching
-      if: inputs.blue_green_enabled == 'true' && inputs.environment == 'prod'
+      if: inputs.blue_green_enabled == 'true' && (inputs.environment == 'ppr' || inputs.environment == 'prod')
       run: |
         NAMESPACE="${{ steps.namespace.outputs.namespace }}"
         APP_NAME="${{ inputs.application_name }}"
@@ -615,8 +615,15 @@ runs:
         echo "   - New deployment namespace: ${NAMESPACE}"
         
         # Simple traffic switch - update main ingress to point to new namespace
+        ENV="${{ inputs.environment }}"
+        if [[ "$ENV" == "ppr" ]]; then
+          INGRESS_HOST="preprod.mydomain.com"
+        else
+          INGRESS_HOST="api.mydomain.com"
+        fi
+        
         kubectl patch ingress ${APP_NAME}-ingress -n default --type='merge' \
-          -p='{"spec":{"rules":[{"host":"api.mydomain.com","http":{"paths":[{"path":"/(backend1/|$)(.*)","pathType":"ImplementationSpecific","backend":{"service":{"name":"'${APP_NAME}'","namespace":"'${NAMESPACE}'","port":{"number":8080}}}}]}}]}}'
+          -p='{"spec":{"rules":[{"host":"'${INGRESS_HOST}'","http":{"paths":[{"path":"/(backend1/|$)(.*)","pathType":"ImplementationSpecific","backend":{"service":{"name":"'${APP_NAME}'","namespace":"'${NAMESPACE}'","port":{"number":8080}}}}]}}]}}'
         
         # Update active slot label
         kubectl label ingress ${APP_NAME}-ingress -n default active-slot=${TARGET_SLOT} --overwrite
