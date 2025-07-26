@@ -131,69 +131,79 @@ jobs:
           
           case "$TARGET_ENV" in
             "dev")
-              if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]]; then
                 SHOULD_DEPLOY="true"
-                if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Dev deployment approved: manual trigger with branch validation override"
-                else
-                  echo "✅ Dev deployment approved: dev/develop branch or manual trigger"
-                fi
+                echo "✅ Dev deployment approved: dev/develop branch"
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ Dev deployment approved: manual override from branch $GITHUB_REF"
+                echo "   🚨 Branch validation overridden by: $ACTOR"
+              elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+                echo "❌ Dev deployment blocked: workflow_dispatch from non-dev branch requires override"
+                echo "   📍 Current branch: $GITHUB_REF"
+                echo "   ✅ To deploy: Check 'Override branch validation' option"
+                SHOULD_DEPLOY="false"
               else
-                echo "❌ Dev deployment blocked: must be dev/develop branch or use manual override"
+                echo "❌ Dev deployment blocked: must be dev/develop branch or manual trigger with override"
+                SHOULD_DEPLOY="false"
               fi
               ;;
             "sqe")
-              if [[ "$GITHUB_REF" == "refs/heads/sqe" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/sqe" ]]; then
                 SHOULD_DEPLOY="true"
-                if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ SQE deployment approved: manual trigger with branch validation override"
-                else
-                  echo "✅ SQE deployment approved: sqe branch or manual trigger"
-                fi
+                echo "✅ SQE deployment approved: sqe branch"
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ SQE deployment approved: manual override from branch $GITHUB_REF"
+                echo "   🚨 Branch validation overridden by: $ACTOR"
+              elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+                echo "❌ SQE deployment blocked: workflow_dispatch from non-sqe branch requires override"
+                echo "   📍 Current branch: $GITHUB_REF"
+                echo "   ✅ To deploy: Check 'Override branch validation' option"
+                SHOULD_DEPLOY="false"
               else
-                echo "❌ SQE deployment blocked: must be sqe branch or use manual override"
+                echo "❌ SQE deployment blocked: must be sqe branch or manual trigger with override"
+                SHOULD_DEPLOY="false"
               fi
               ;;
             "ppr")
-              if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/release/"* ]]; then
                 SHOULD_DEPLOY="true"
-                if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Pre-Prod deployment approved: manual trigger with branch validation override"
-                else
-                  echo "✅ Pre-Prod deployment approved: release branch or manual trigger"
-                fi
+                echo "✅ Pre-Prod deployment approved: release branch"
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ Pre-Prod deployment approved: manual override from branch $GITHUB_REF"
+                echo "   🚨 Branch validation overridden by: $ACTOR"
+              elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+                echo "❌ Pre-Prod deployment blocked: workflow_dispatch from non-release branch requires override"
+                echo "   📍 Current branch: $GITHUB_REF"
+                echo "   ✅ To deploy: Check 'Override branch validation' option"
+                SHOULD_DEPLOY="false"
               else
-                echo "❌ Pre-Prod deployment blocked: must be release branch or use manual override"
+                echo "❌ Pre-Prod deployment blocked: must be release branch or manual trigger with override"
+                SHOULD_DEPLOY="false"
               fi
               ;;
             "prod")
-              if [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/tags/"* ]]; then
                 SHOULD_DEPLOY="true"
-                if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Production deployment approved: manual trigger with branch validation override"
-                  if [[ -n "$DEPLOY_NOTES" ]]; then
-                    echo "   📝 Deployment Notes: $DEPLOY_NOTES"
-                  fi
-                else
-                  echo "✅ Production deployment approved: tag or manual trigger"
-                fi
+                echo "✅ Production deployment approved: tag release"
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 echo "✅ Production deployment approved: manual override from branch $GITHUB_REF"
+                echo "   🚨 Branch validation overridden by: $ACTOR"
                 if [[ -n "$DEPLOY_NOTES" ]]; then
                   echo "   📝 Deployment Notes: $DEPLOY_NOTES"
                 fi
+              elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+                echo "❌ Production deployment blocked: workflow_dispatch from non-tag requires override"
+                echo "   📍 Current branch: $GITHUB_REF"
+                echo "   ✅ To deploy: Check 'Override branch validation' option"
+                echo "   📝 Deployment notes required for manual production deployments"
+                SHOULD_DEPLOY="false"
               else
-                echo "❌ Production deployment blocked: must be tag or use manual override"
+                echo "❌ Production deployment blocked: must be tag or manual trigger with override"
+                SHOULD_DEPLOY="false"
               fi
               ;;
             *)
