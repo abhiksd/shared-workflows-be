@@ -145,6 +145,52 @@ docker run -p 8080:8080 \
   java-backend1:latest
 ```
 
+## 🚀 **Deployment & Branch Strategy**
+
+### Branch-Based Deployment Rules
+
+| Environment | Auto-Deploy Trigger | Manual Deploy Rules |
+|-------------|-------------------|-------------------|
+| **DEV** | Push to `dev`, `develop` | Override required for other branches |
+| **SQE** | Push to `sqe` | Override required for other branches |
+| **PPR** | Push to `release/*` | Override required for other branches |
+| **PROD** | Push tags (e.g., `v1.0.0`) | Override required for other branches |
+
+### Manual Deployment Commands
+
+#### **Standard Deployment (From Correct Branch)**
+```bash
+# Deploy to DEV from dev branch
+gh workflow run deploy.yml -f environment=dev
+
+# Deploy to PROD from tag
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+#### **Override Deployment (From Any Branch)**
+```bash
+# Deploy to DEV from feature branch (requires override)
+gh workflow run deploy.yml \
+  -f environment=dev \
+  -f override_branch_validation=true \
+  -f deploy_notes="Testing feature branch deployment"
+
+# Emergency PROD deployment (requires override + notes)
+gh workflow run deploy.yml \
+  -f environment=prod \
+  -f override_branch_validation=true \
+  -f deploy_notes="Critical hotfix - approved by incident commander"
+```
+
+#### **Override Usage Guidelines**
+- ✅ **Emergency hotfixes** and critical patches
+- ✅ **Feature branch testing** in lower environments
+- ✅ **Rollback scenarios** requiring specific commits
+- ❌ **Regular development** should use proper branches
+- 📝 **All override usage** is logged with user attribution
+
+> **📚 For complete override documentation, see:** `OVERRIDE_BRANCH_VALIDATION_GUIDE.md`
+
 ## 🔗 Branch Structure
 
 This repository uses a branch-based approach:

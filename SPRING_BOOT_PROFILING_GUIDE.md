@@ -398,6 +398,16 @@ java -jar target/java-backend1-*.jar --spring.profiles.active=dev --debug
 3. **Rotate secrets regularly** - Leverage Kubernetes secret rotation
 4. **Audit access** - Monitor secret access through Kubernetes logs
 
+### Deployment & Branch Validation
+1. **Use correct branches** - Follow environment-specific branch rules
+2. **Override when necessary** - Use `override_branch_validation` for emergency/testing scenarios
+3. **Document override usage** - Always provide deployment notes for audit trail
+4. **Monitor override patterns** - Review frequent override usage for process improvements
+
+> **📚 For complete deployment and override documentation, see:**
+> - `OVERRIDE_BRANCH_VALIDATION_GUIDE.md` - Complete override functionality guide
+> - `DEPLOYMENT.md` - Detailed deployment procedures and checklists
+
 ### Configuration Management
 1. **Version control all changes** - Track configuration changes in Git
 2. **Test configuration changes** - Validate in dev before production

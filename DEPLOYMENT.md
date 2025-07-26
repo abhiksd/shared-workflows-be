@@ -169,6 +169,56 @@ These are automatically injected into the application container:
 - `JWT_SECRET` - JWT token signing secret
 - `API_KEY` - External service API authentication key
 
+## 🚀 **Manual Deployment Guide**
+
+### Branch Validation Rules
+
+The deployment workflow enforces strict branch validation:
+
+| Environment | Required Branch/Tag | Manual Deployment |
+|-------------|-------------------|-------------------|
+| **DEV** | `dev`, `develop` | Override required for other branches |
+| **SQE** | `sqe` | Override required for other branches |
+| **PPR** | `release/*` | Override required for other branches |
+| **PROD** | `refs/tags/*` | Override required for other branches |
+
+### Using Override Branch Validation
+
+When you need to deploy from an unauthorized branch:
+
+#### **Via GitHub UI**
+1. Go to **Actions** → **Deploy Java Backend 1** → **Run workflow**
+2. Select target environment
+3. ✅ **Check "Override branch validation"**
+4. **Add deployment notes** (required for audit)
+5. Click **Run workflow**
+
+#### **Via GitHub CLI**
+```bash
+# Deploy to DEV from feature branch
+gh workflow run deploy.yml \
+  -f environment=dev \
+  -f override_branch_validation=true \
+  -f deploy_notes="Testing feature branch changes"
+
+# Emergency PROD deployment
+gh workflow run deploy.yml \
+  -f environment=prod \
+  -f override_branch_validation=true \
+  -f deploy_notes="Critical hotfix - approved by incident commander"
+```
+
+### When to Use Override
+- ✅ **Emergency hotfixes** requiring immediate deployment
+- ✅ **Testing deployments** from feature branches
+- ✅ **Rollback scenarios** requiring specific commit deployment
+- ❌ **Not for regular development** - use proper branches instead
+
+### Security & Audit
+- All override usage is **logged with user attribution**
+- Deployment notes are **required for production overrides**
+- Override activities are **tracked for compliance**
+
 ## 📋 **Deployment Checklist**
 
 Before deploying to production:
@@ -176,8 +226,10 @@ Before deploying to production:
 - [ ] Code reviewed and approved
 - [ ] Unit tests passing
 - [ ] Integration tests passing
-- [ ] Security scan completed
+- [ ] Security scan completed (SonarQube, Checkmarx)
 - [ ] Performance testing completed
+- [ ] **Branch validation**: Using correct branch OR override justified
+- [ ] **Deployment notes**: Provided if using override
 - [ ] Helm chart values updated
 - [ ] Spring Boot profiles configured for target environment
 - [ ] Kubernetes secrets created with required values
