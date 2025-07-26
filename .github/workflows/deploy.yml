@@ -15,6 +15,7 @@ on:
     paths:
       - '**'
       - 'helm/**'
+      - '!.github/workflows/**'
       - '.github/workflows/deploy.yml'
   pull_request:
     branches:
@@ -24,6 +25,7 @@ on:
     paths:
       - '**'
       - 'helm/**'
+      - '!.github/workflows/**'
   workflow_dispatch:
     inputs:
       environment:
