@@ -11,8 +11,7 @@ on:
       - dev
       - develop  # Legacy support
       - sqe
-      - ppr
-      - 'release/**'  # Legacy support
+      - 'release/**'
     paths:
       - '**'
       - 'helm/**'
@@ -22,7 +21,6 @@ on:
       - dev
       - develop  # Legacy support
       - sqe
-      - ppr
     paths:
       - '**'
       - 'helm/**'
