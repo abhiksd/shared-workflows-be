@@ -57,3 +57,43 @@ monitoring:
 podDisruptionBudget:
   enabled: true
   minAvailable: 2
+
+# Azure Key Vault integration (enabled for ppr)
+azureKeyVault:
+  enabled: true
+  keyvaultName: "kv-java-backend1-ppr"
+  tenantId: "${AZURE_TENANT_ID}"
+  userAssignedIdentityID: "${AZURE_CLIENT_ID}"
+  secrets:
+    - objectName: "mongodb-connection-string"
+      objectAlias: "mongodb-connection-string"
+    - objectName: "redis-password"
+      objectAlias: "redis-password"
+    - objectName: "memcached-servers"
+      objectAlias: "memcached-servers"
+    - objectName: "jwt-secret"
+      objectAlias: "jwt-secret"
+    - objectName: "api-key"
+      objectAlias: "api-key"
+    - objectName: "application-insights-key"
+      objectAlias: "application-insights-key"
+    - objectName: "oauth2-client-secret"
+      objectAlias: "oauth2-client-secret"
+  secretObjects:
+    - secretName: "app-secrets"
+      type: "Opaque"
+      data:
+        - objectName: "mongodb-connection-string"
+          key: "mongodb-connection-string"
+        - objectName: "redis-password"
+          key: "redis-password"
+        - objectName: "memcached-servers"
+          key: "memcached-servers"
+        - objectName: "jwt-secret"
+          key: "jwt-secret"
+        - objectName: "api-key"
+          key: "api-key"
+        - objectName: "application-insights-key"
+          key: "application-insights-key"
+        - objectName: "oauth2-client-secret"
+          key: "oauth2-client-secret"

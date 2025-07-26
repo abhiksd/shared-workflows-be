@@ -48,6 +48,13 @@ env:
 autoscaling:
   enabled: false
 
+# Azure Key Vault integration (disabled for dev)
+azureKeyVault:
+  enabled: false
+  keyvaultName: "kv-java-backend1-dev"
+  tenantId: "${AZURE_TENANT_ID}"
+  userAssignedIdentityID: "${AZURE_CLIENT_ID}"
+
 monitoring:
   enabled: true
   servicemonitor:

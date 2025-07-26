@@ -42,6 +42,34 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 5
 
+# Azure Key Vault integration (enabled for sqe)
+azureKeyVault:
+  enabled: true
+  keyvaultName: "kv-java-backend1-sqe"
+  tenantId: "${AZURE_TENANT_ID}"
+  userAssignedIdentityID: "${AZURE_CLIENT_ID}"
+  secrets:
+    - objectName: "mongodb-connection-string"
+      objectAlias: "mongodb-connection-string"
+    - objectName: "redis-password"
+      objectAlias: "redis-password"
+    - objectName: "jwt-secret"
+      objectAlias: "jwt-secret"
+    - objectName: "api-key"
+      objectAlias: "api-key"
+  secretObjects:
+    - secretName: "app-secrets"
+      type: "Opaque"
+      data:
+        - objectName: "mongodb-connection-string"
+          key: "mongodb-connection-string"
+        - objectName: "redis-password"
+          key: "redis-password"
+        - objectName: "jwt-secret"
+          key: "jwt-secret"
+        - objectName: "api-key"
+          key: "api-key"
+
 monitoring:
   enabled: true
   servicemonitor:
