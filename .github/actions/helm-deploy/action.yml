@@ -38,9 +38,7 @@ inputs:
   azure_subscription_id:
     description: 'Azure Subscription ID for OIDC authentication'
     required: false
-  keyvault_name:
-    description: 'Azure Key Vault name'
-    required: false
+
   deployment_context:
     description: 'JSON deployment context passed from validate-environment'
     required: false
@@ -368,18 +366,19 @@ runs:
             value: ${{ inputs.aks_resource_group }}
         EOF
         
-        # Add Azure Key Vault configuration if provided
-        if [[ -n "${{ inputs.azure_tenant_id }}" && -n "${{ inputs.azure_client_id }}" && -n "${{ inputs.keyvault_name }}" ]]; then
-          cat >> ${RUNTIME_VALUES_FILE} << EOF
+        # Add Spring Boot profiling configuration
+        cat >> ${RUNTIME_VALUES_FILE} << EOF
         
-        # Azure Key Vault configuration - Inherited from secrets
-        azureKeyVault:
-          tenantId: "${{ inputs.azure_tenant_id }}"
-          userAssignedIdentityID: "${{ inputs.azure_client_id }}"
-          keyvaultName: "${{ inputs.keyvault_name }}"
+        # Spring Boot Profile Configuration - Environment-based secret management
+        springBootProfile:
+          activeProfile: ${{ inputs.environment }}
+          configLocation: "classpath:application-${{ inputs.environment }}.yml"
+          secretManagement:
+            enabled: true
+            type: "kubernetes-secrets"
+            namespace: ${NAMESPACE}
         EOF
-          echo "✅ Azure Key Vault configuration added to runtime values"
-        fi
+        echo "✅ Spring Boot profiling configuration added to runtime values"
         
         # Add deployment context metadata if available
         if [[ -n "${{ inputs.deployment_context }}" ]]; then

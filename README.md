@@ -33,7 +33,7 @@ Services reference these workflows from their own branches:
 # In service branch .github/workflows/deploy.yml
 jobs:
   deploy:
-    uses: ./.github/workflows/shared-deploy.yml@shared-github-actions
+    uses: ./.github/workflows/shared-deploy.yml@no-keyvault-shared-github-actions
     with:
       environment: dev
       application_name: my-service
@@ -52,6 +52,8 @@ Complete CI/CD pipeline for Java Spring Boot applications:
 - Docker build and push
 - Helm deployment to Kubernetes
 - Security scanning integration
+- Spring Boot profile-based configuration management
+- Kubernetes-native secret management (no external key vault dependency)
 
 ### shared-security-scan.yml  
 Comprehensive security scanning:
@@ -70,7 +72,7 @@ Automated rollback procedures:
 
 ### maven-build
 ```yaml
-- uses: ./.github/actions/maven-build@shared-github-actions
+- uses: ./.github/actions/maven-build@no-keyvault-shared-github-actions
   with:
     application_name: my-service
     java_version: '21'
@@ -79,7 +81,7 @@ Automated rollback procedures:
 
 ### docker-build-push
 ```yaml
-- uses: ./.github/actions/docker-build-push@shared-github-actions
+- uses: ./.github/actions/docker-build-push@no-keyvault-shared-github-actions
   with:
     application_name: my-service
     application_type: java-springboot
@@ -88,11 +90,19 @@ Automated rollback procedures:
 
 ## 🔄 Updating Shared Workflows
 
-1. Switch to this branch: `git checkout shared-github-actions`
+1. Switch to this branch: `git checkout no-keyvault-shared-github-actions`
 2. Make your changes to workflows or actions
 3. Test with a service branch
 4. Commit and push changes
 5. Service branches automatically use updated workflows
+
+## 🔧 Configuration Management
+
+This branch provides Spring Boot profile-based configuration management:
+- Environment-specific properties through Spring profiles
+- Kubernetes ConfigMaps for non-sensitive configuration
+- Kubernetes Secrets for sensitive data
+- No external key vault dependencies required
 
 ## 📚 Documentation
 
@@ -102,6 +112,7 @@ Automated rollback procedures:
 
 ---
 
-**Branch**: shared-github-actions  
-**Purpose**: Centralized CI/CD workflows and actions  
+**Branch**: no-keyvault-shared-github-actions  
+**Purpose**: Centralized CI/CD workflows and actions with Spring Boot profile-based configuration  
+**Configuration**: Profile-based secret management without external key vault dependency  
 **Usage**: Referenced by service branches for consistent deployments
