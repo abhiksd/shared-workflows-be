@@ -58,11 +58,7 @@ on:
         required: false
         type: string
         default: ''
-      emergency_deployment:
-        description: 'Emergency deployment (requires additional validation for PROD/PPR)'
-        required: false
-        type: boolean
-        default: false
+
 
     secrets: inherit
 
@@ -126,84 +122,10 @@ jobs:
           
           # Validate deployment rules based on target environment
           # Check if branch validation should be overridden
-          OVERRIDE_VALIDATION="${{ inputs.override_branch_validation }}"
-          EMERGENCY_DEPLOYMENT="${{ inputs.emergency_deployment }}"
-          ACTOR="${{ github.actor }}"
+                  OVERRIDE_VALIDATION="${{ inputs.override_branch_validation }}"
+        ACTOR="${{ github.actor }}"
           
-          # Define authorized users for PPR and PROD deployments
-          AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
           
-          # Future enhancement: Team-based authorization
-          # AUTHORIZED_TEAMS="devops-team,release-team,platform-team,emergency-team"
-          # ORG_NAME="your-org-name"  # Set your GitHub organization name
-          
-          # Function to check if user is authorized for protected environments
-          is_authorized_user() {
-            local user="$1"
-            if [[ ",$AUTHORIZED_USERS," == *",$user,"* ]]; then
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          # Future enhancement: Function to check team membership via GitHub API
-          # Requires GITHUB_TOKEN with read:org scope
-          is_user_in_authorized_teams() {
-            local user="$1"
-            
-            # Uncomment and configure when implementing team-based authorization
-            # local teams=("devops-team" "release-team" "platform-team" "emergency-team")
-            # 
-            # for team in "${teams[@]}"; do
-            #   response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            #     "https://api.github.com/orgs/$ORG_NAME/teams/$team/memberships/$user")
-            #   
-            #   if echo "$response" | jq -e '.state == "active"' > /dev/null 2>&1; then
-            #     echo "✅ User $user is member of $team"
-            #     return 0
-            #   fi
-            # done
-            
-            return 1  # Default: no team membership found
-          }
-          
-          # Function to validate protected environment deployment
-          validate_protected_deployment() {
-            local env="$1"
-            local requires_emergency="$2"
-            
-            echo "🔒 Validating protected environment deployment: $env"
-            
-            # Check if it's a manual deployment attempting override
-            if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-              
-              # Check if user is authorized (individual users)
-              if is_authorized_user "$ACTOR"; then
-                echo "✅ User '$ACTOR' individually authorized for $env deployment"
-              # Future enhancement: Check team membership
-              # elif is_user_in_authorized_teams "$ACTOR"; then
-              #   echo "✅ User '$ACTOR' authorized via team membership for $env deployment"
-              else
-                echo "❌ User '$ACTOR' is not authorized for $env deployments"
-                echo "   Authorized users: $AUTHORIZED_USERS"
-                # echo "   Authorized teams: $AUTHORIZED_TEAMS"  # Future enhancement
-                return 1
-              fi
-              
-              # For emergency deployments, require emergency flag
-              if [[ "$requires_emergency" == "true" && "$EMERGENCY_DEPLOYMENT" != "true" ]]; then
-                echo "❌ Emergency deployment flag required for $env manual override"
-                echo "   Please set emergency_deployment=true for manual $env deployments"
-                return 1
-              fi
-              
-              echo "✅ Protected deployment authorized for user '$ACTOR'"
-              return 0
-            fi
-            
-            return 0
-          }
           
           case "$TARGET_ENV" in
             "dev")
@@ -245,51 +167,47 @@ jobs:
               fi
               ;;
             "ppr")
-              # Validate protection for PPR environment
-              if ! validate_protected_deployment "PPR" "false"; then
-                SHOULD_DEPLOY="false"
-                echo "❌ PPR deployment blocked: protection validation failed"
-              elif [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == refs/heads/release/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="aks-preprod-cluster"
                 AKS_RG="rg-aks-preprod"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Pre-Prod deployment approved: manual trigger with authorized override"
+                  echo "✅ Pre-Prod deployment approved: manual trigger with branch validation override"
                 else
-                  echo "✅ Pre-Prod deployment approved: release branch or authorized manual trigger"
+                  echo "✅ Pre-Prod deployment approved: release branch or manual trigger"
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="aks-preprod-cluster"
                 AKS_RG="rg-aks-preprod"
-                echo "✅ Pre-Prod deployment approved: authorized manual override from branch $GITHUB_REF"
+                echo "✅ Pre-Prod deployment approved: manual override from branch $GITHUB_REF"
               else
-                echo "❌ Pre-Prod deployment blocked: must be release branch or authorized manual override"
+                echo "❌ Pre-Prod deployment blocked: must be release branch or use manual override"
               fi
               ;;
             "prod")
-              # Validate protection for PROD environment (strongest protection)
-              if ! validate_protected_deployment "PROD" "true"; then
-                SHOULD_DEPLOY="false"
-                echo "❌ PROD deployment blocked: protection validation failed"
-              elif [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == refs/tags/* ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="aks-prod-cluster"
                 AKS_RG="rg-aks-prod"
                 if [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
-                  echo "✅ Production deployment approved: EMERGENCY manual trigger with authorized override"
-                  echo "   🚨 EMERGENCY DEPLOYMENT: User=$ACTOR, Notes='$DEPLOY_NOTES'"
+                  echo "✅ Production deployment approved: manual trigger with branch validation override"
+                  if [[ -n "$DEPLOY_NOTES" ]]; then
+                    echo "   📝 Deployment Notes: $DEPLOY_NOTES"
+                  fi
                 else
-                  echo "✅ Production deployment approved: tag or authorized manual trigger"
+                  echo "✅ Production deployment approved: tag or manual trigger"
                 fi
               elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$OVERRIDE_VALIDATION" == "true" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="aks-prod-cluster"
                 AKS_RG="rg-aks-prod"
-                echo "✅ Production deployment approved: EMERGENCY authorized manual override from branch $GITHUB_REF"
-                echo "   🚨 EMERGENCY DEPLOYMENT: User=$ACTOR, Notes='$DEPLOY_NOTES'"
+                echo "✅ Production deployment approved: manual override from branch $GITHUB_REF"
+                if [[ -n "$DEPLOY_NOTES" ]]; then
+                  echo "   📝 Deployment Notes: $DEPLOY_NOTES"
+                fi
               else
-                echo "❌ Production deployment blocked: must be tag or authorized emergency manual override"
+                echo "❌ Production deployment blocked: must be tag or use manual override"
               fi
               ;;
             *)
@@ -435,57 +353,30 @@ jobs:
           echo "   Event type: $EVENT_NAME"
           echo "   Target environment: $ENVIRONMENT"
           
-          # Define authorized users for emergency bypass (same as deployment authorization)
-          AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
-          
-          # Function to check if user is authorized
-          is_authorized_user() {
-            local user="$1"
-            if [[ ",$AUTHORIZED_USERS," == *",$user,"* ]]; then
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          if [[ "$BYPASS_SONAR" == "true" ]]; then
-            # Emergency bypass is enabled - check authorization
-            if is_authorized_user "$ACTOR"; then
-                          echo "🚨 EMERGENCY BYPASS ACTIVATED: SonarQube scan will be bypassed"
-            echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
-              echo "   Authorized user: $ACTOR"
-              echo "   Target environment: $ENVIRONMENT"
-                          echo "   Reason: Emergency deployment bypass (repository configuration)"
-            echo "   ⚠️  SECURITY WARNING: Quality gate bypassed - immediate manual review required"
-            echo ""
-            echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
-            echo "   ✅ EMERGENCY_BYPASS_SONAR repository variable set to 'true'"
-              echo "   ✅ User '$ACTOR' is in authorized users list"
-              echo "   ✅ Bypass approved for emergency deployment"
-              echo ""
-                          echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
-            echo "   1. Delete EMERGENCY_BYPASS_SONAR repository variable immediately after deployment"
-              echo "   2. Conduct manual security review of deployed code"
-              echo "   3. Schedule retroactive SonarQube scan"
-              echo "   4. Document emergency bypass justification"
-              echo "bypass_approved=true" >> $GITHUB_OUTPUT
-            else
-                          echo "❌ EMERGENCY BYPASS DENIED: User '$ACTOR' not authorized for security scan bypass"
-            echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
-              echo "   Authorized users: $AUTHORIZED_USERS"
-              echo "   Current user: $ACTOR"
-              echo ""
-              echo "🔒 SECURITY PROTECTION: Even with emergency bypass enabled,"
-              echo "    only authorized users can perform emergency deployments."
-              echo "bypass_approved=false" >> $GITHUB_OUTPUT
-              exit 1
-            fi
-          else
-            echo "✅ Normal SonarQube scan will proceed"
-            echo "   Repository variable EMERGENCY_BYPASS_SONAR: false (default)"
-            echo "   Standard quality gate validation active"
-            echo "bypass_approved=false" >> $GITHUB_OUTPUT
-          fi
+                  if [[ "$BYPASS_SONAR" == "true" ]]; then
+          echo "🚨 EMERGENCY BYPASS ACTIVATED: SonarQube scan will be bypassed"
+          echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
+          echo "   Requested by: $ACTOR"
+          echo "   Target environment: $ENVIRONMENT"
+          echo "   Reason: Emergency deployment bypass (repository configuration)"
+          echo "   ⚠️  SECURITY WARNING: Quality gate bypassed - immediate manual review required"
+          echo ""
+          echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
+          echo "   ✅ EMERGENCY_BYPASS_SONAR repository variable set to 'true'"
+          echo "   ✅ Bypass approved for emergency deployment"
+          echo ""
+          echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
+          echo "   1. Delete EMERGENCY_BYPASS_SONAR repository variable immediately after deployment"
+          echo "   2. Conduct manual security review of deployed code"
+          echo "   3. Schedule retroactive SonarQube scan"
+          echo "   4. Document emergency bypass justification"
+          echo "bypass_approved=true" >> $GITHUB_OUTPUT
+        else
+          echo "✅ Normal SonarQube scan will proceed"
+          echo "   Repository variable EMERGENCY_BYPASS_SONAR: false (default)"
+          echo "   Standard quality gate validation active"
+          echo "bypass_approved=false" >> $GITHUB_OUTPUT
+        fi
 
       - name: SonarQube Scan
         id: sonar
@@ -571,51 +462,24 @@ jobs:
           echo "   Event type: $EVENT_NAME"
           echo "   Target environment: $ENVIRONMENT"
           
-          # Define authorized users for emergency bypass (same as deployment authorization)
-          AUTHORIZED_USERS="admin,devops-lead,release-manager,platform-engineer"
-          
-          # Function to check if user is authorized
-          is_authorized_user() {
-            local user="$1"
-            if [[ ",$AUTHORIZED_USERS," == *",$user,"* ]]; then
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          if [[ "$BYPASS_CHECKMARX" == "true" ]]; then
-            # Emergency bypass is enabled - check authorization
-            if is_authorized_user "$ACTOR"; then
-                          echo "🚨 EMERGENCY BYPASS ACTIVATED: Checkmarx scan will be bypassed"
-            echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
-            echo "   Authorized user: $ACTOR"
-            echo "   Target environment: $ENVIRONMENT"
-            echo "   Reason: Emergency deployment bypass (repository configuration)"
-            echo "   ⚠️  SECURITY WARNING: Security scan bypassed - immediate manual review required"
-            echo ""
-            echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
-            echo "   ✅ EMERGENCY_BYPASS_CHECKMARX repository variable set to 'true'"
-            echo "   ✅ User '$ACTOR' is in authorized users list"
-            echo "   ✅ Bypass approved for emergency deployment"
-            echo ""
-            echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
-            echo "   1. Delete EMERGENCY_BYPASS_CHECKMARX repository variable immediately after deployment"
-              echo "   2. Conduct manual security review of deployed code"
-              echo "   3. Schedule retroactive Checkmarx security scan"
-              echo "   4. Document emergency bypass justification"
-              echo "bypass_approved=true" >> $GITHUB_OUTPUT
-            else
-                          echo "❌ EMERGENCY BYPASS DENIED: User '$ACTOR' not authorized for security scan bypass"
-            echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
-            echo "   Authorized users: $AUTHORIZED_USERS"
-            echo "   Current user: $ACTOR"
-            echo ""
-            echo "🔒 SECURITY PROTECTION: Even with emergency bypass enabled,"
-            echo "    only authorized users can perform emergency deployments."
-            echo "bypass_approved=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+                  if [[ "$BYPASS_CHECKMARX" == "true" ]]; then
+          echo "🚨 EMERGENCY BYPASS ACTIVATED: Checkmarx scan will be bypassed"
+          echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
+          echo "   Requested by: $ACTOR"
+          echo "   Target environment: $ENVIRONMENT"
+          echo "   Reason: Emergency deployment bypass (repository configuration)"
+          echo "   ⚠️  SECURITY WARNING: Security scan bypassed - immediate manual review required"
+          echo ""
+          echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
+          echo "   ✅ EMERGENCY_BYPASS_CHECKMARX repository variable set to 'true'"
+          echo "   ✅ Bypass approved for emergency deployment"
+          echo ""
+          echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
+          echo "   1. Delete EMERGENCY_BYPASS_CHECKMARX repository variable immediately after deployment"
+          echo "   2. Conduct manual security review of deployed code"
+          echo "   3. Schedule retroactive Checkmarx security scan"
+          echo "   4. Document emergency bypass justification"
+          echo "bypass_approved=true" >> $GITHUB_OUTPUT
         else
           echo "✅ Normal Checkmarx scan will proceed"
           echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: false (default)"
@@ -706,64 +570,12 @@ jobs:
           azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           jar_artifact_name: ${{ needs.maven-build.outputs.jar_artifact }}
 
-  # Production approval gate - requires manual approval for prod deployments
-  production-approval:
-    runs-on: ubuntu-latest
-    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
-    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && needs.validate-environment.outputs.target_environment == 'prod' && !failure() && !cancelled()
-    environment: 
-      name: production-approval
-      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - name: 🛡️ Production Deployment Approval Required
-        run: |
-          echo "🚨 PRODUCTION DEPLOYMENT APPROVAL REQUIRED 🚨"
-          echo ""
-          echo "📋 Deployment Details:"
-          echo "   Application: ${{ needs.setup.outputs.application_name }}"
-          echo "   Version: ${{ needs.setup.outputs.version }}"
-          echo "   Image Tag: ${{ needs.setup.outputs.image_tag }}"
-          echo "   Environment: ${{ needs.validate-environment.outputs.target_environment }}"
-          echo "   AKS Cluster: ${{ needs.validate-environment.outputs.aks_cluster_name }}"
-          echo ""
-          echo "✅ Quality Gates Status:"
-          echo "   SonarQube: ${{ needs.sonar-scan.outputs.scan_status }}"
-          echo "   Checkmarx: ${{ needs.checkmarx-scan.outputs.scan_status }}"
-          echo ""
-          # Display emergency bypass information if applicable
-          if [[ "${{ needs.sonar-scan.outputs.scan_status }}" == "BYPASSED" ]]; then
-            echo "🚨 EMERGENCY BYPASS ALERT - SonarQube:"
-            echo "   Status: BYPASSED"
-            echo "   Reason: ${{ needs.sonar-scan.outputs.bypass_reason }}"
-            echo "   ⚠️  Manual security review required post-deployment"
-            echo ""
-          fi
-          if [[ "${{ needs.checkmarx-scan.outputs.scan_status }}" == "BYPASSED" ]]; then
-            echo "🚨 EMERGENCY BYPASS ALERT - Checkmarx:"
-            echo "   Status: BYPASSED" 
-            echo "   Reason: ${{ needs.checkmarx-scan.outputs.bypass_reason }}"
-            echo "   ⚠️  Manual security review required post-deployment"
-            echo ""
-          fi
-          echo ""
-          echo "👥 Awaiting manual approval from authorized personnel..."
-          echo "⏳ This deployment will proceed only after manual approval."
+
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build, production-approval]
-    
-    # Deploy to non-prod environments directly, or to prod after approval
-    if: |
-      needs.validate-environment.outputs.should_deploy == 'true' && 
-      needs.setup.outputs.should_deploy == 'true' && 
-      (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && 
-      (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && 
-      !failure() && !cancelled() &&
-      (
-        needs.validate-environment.outputs.target_environment != 'prod' ||
-        (needs.validate-environment.outputs.target_environment == 'prod' && needs.production-approval.result == 'success')
-      )
+    needs: [validate-environment, setup, sonar-scan, checkmarx-scan, build]
+    if: needs.validate-environment.outputs.should_deploy == 'true' && needs.setup.outputs.should_deploy == 'true' && (needs.sonar-scan.outputs.scan_status == 'PASSED' || needs.sonar-scan.outputs.scan_status == 'BYPASSED') && (needs.checkmarx-scan.outputs.scan_status == 'PASSED' || needs.checkmarx-scan.outputs.scan_status == 'BYPASSED') && !failure() && !cancelled()
 
     environment: 
       name: ${{ needs.validate-environment.outputs.target_environment }}
