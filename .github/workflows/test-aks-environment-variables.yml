@@ -1,0 +1,243 @@
+name: Test AKS Environment Variables
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_environment:
+        description: 'Environment to test AKS configuration'
+        required: true
+        type: choice
+        options:
+        - dev
+        - sqe
+        - ppr
+        - prod
+      validate_all:
+        description: 'Test all environments at once'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test-single-environment:
+    runs-on: ubuntu-latest
+    if: inputs.validate_all != true
+    environment: ${{ inputs.test_environment }}
+    steps:
+      - name: Test Single Environment Configuration
+        run: |
+          echo "🧪 Testing AKS environment variables for: ${{ inputs.test_environment }}"
+          echo "================================================================"
+          echo ""
+          echo "📋 Environment Variables from '${{ inputs.test_environment }}' environment:"
+          echo "   AKS_CLUSTER_NAME: '${{ vars.AKS_CLUSTER_NAME }}'"
+          echo "   AKS_RESOURCE_GROUP: '${{ vars.AKS_RESOURCE_GROUP }}'"
+          echo "   AKS_REGION: '${{ vars.AKS_REGION }}'"
+          echo ""
+          
+          # Validation checks
+          ERRORS=0
+          
+          if [ -z "${{ vars.AKS_CLUSTER_NAME }}" ]; then
+            echo "❌ ERROR: AKS_CLUSTER_NAME is not set in ${{ inputs.test_environment }} environment"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ AKS_CLUSTER_NAME is configured"
+          fi
+          
+          if [ -z "${{ vars.AKS_RESOURCE_GROUP }}" ]; then
+            echo "❌ ERROR: AKS_RESOURCE_GROUP is not set in ${{ inputs.test_environment }} environment"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ AKS_RESOURCE_GROUP is configured"
+          fi
+          
+          if [ -z "${{ vars.AKS_REGION }}" ]; then
+            echo "⚠️ WARNING: AKS_REGION is not set (will use default)"
+          else
+            echo "✅ AKS_REGION is configured"
+          fi
+          
+          echo ""
+          echo "📊 Test Results:"
+          if [ $ERRORS -eq 0 ]; then
+            echo "✅ All required variables are configured for ${{ inputs.test_environment }}"
+            echo "🎯 Environment is ready for deployment"
+          else
+            echo "❌ $ERRORS error(s) found in ${{ inputs.test_environment }} configuration"
+            echo "🔧 Please configure missing variables in GitHub Environment settings"
+            exit 1
+          fi
+
+  test-all-environments:
+    runs-on: ubuntu-latest
+    if: inputs.validate_all == true
+    strategy:
+      matrix:
+        environment: [dev, sqe, ppr, prod]
+      fail-fast: false
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Test Environment Configuration
+        run: |
+          echo "🧪 Testing AKS configuration for: ${{ matrix.environment }}"
+          echo "================================================"
+          echo ""
+          echo "📋 Environment Variables:"
+          echo "   AKS_CLUSTER_NAME: '${{ vars.AKS_CLUSTER_NAME }}'"
+          echo "   AKS_RESOURCE_GROUP: '${{ vars.AKS_RESOURCE_GROUP }}'"
+          echo "   AKS_REGION: '${{ vars.AKS_REGION }}'"
+          echo ""
+          
+          # Quick validation
+          ERRORS=0
+          
+          if [ -z "${{ vars.AKS_CLUSTER_NAME }}" ]; then
+            echo "❌ AKS_CLUSTER_NAME not set"
+            ERRORS=$((ERRORS + 1))
+          fi
+          
+          if [ -z "${{ vars.AKS_RESOURCE_GROUP }}" ]; then
+            echo "❌ AKS_RESOURCE_GROUP not set"
+            ERRORS=$((ERRORS + 1))
+          fi
+          
+          if [ $ERRORS -eq 0 ]; then
+            echo "✅ Configuration valid for ${{ matrix.environment }}"
+          else
+            echo "❌ Configuration incomplete for ${{ matrix.environment }}"
+            exit 1
+          fi
+
+  generate-summary-report:
+    runs-on: ubuntu-latest
+    if: inputs.validate_all == true
+    needs: test-all-environments
+    steps:
+      - name: Generate Configuration Summary
+        run: |
+          echo "📊 AKS ENVIRONMENT VARIABLES VALIDATION SUMMARY"
+          echo "=============================================="
+          echo ""
+          echo "🎯 Test Results:"
+          echo "   Test Type: All Environments"
+          echo "   Timestamp: $(date -u)"
+          echo "   Triggered By: ${{ github.actor }}"
+          echo ""
+          echo "📋 Environment Status:"
+          
+          # The individual jobs will show their own results
+          # This is a summary job that runs after all tests
+          if [ "${{ needs.test-all-environments.result }}" = "success" ]; then
+            echo "   ✅ All environments configured correctly"
+            echo ""
+            echo "🚀 Ready for Deployment:"
+            echo "   - All required AKS variables are set"
+            echo "   - Dynamic cluster selection is ready"
+            echo "   - Environments: dev, sqe, ppr, prod"
+          else
+            echo "   ❌ Some environments have configuration issues"
+            echo ""
+            echo "🔧 Next Steps:"
+            echo "   1. Check individual job results above"
+            echo "   2. Configure missing variables in GitHub Environment settings"
+            echo "   3. Re-run this test workflow"
+            echo ""
+            echo "📋 Required Variables (same names, different values per environment):"
+            echo "   - AKS_CLUSTER_NAME"
+            echo "   - AKS_RESOURCE_GROUP"
+            echo "   - AKS_REGION (optional)"
+          fi
+
+  simulate-deployment-workflow:
+    runs-on: ubuntu-latest
+    if: inputs.validate_all != true
+    needs: test-single-environment
+    environment: ${{ inputs.test_environment }}
+    steps:
+      - name: Simulate Deployment Configuration Loading
+        run: |
+          echo "🔄 Simulating deployment workflow for: ${{ inputs.test_environment }}"
+          echo "================================================================"
+          echo ""
+          
+          # Simulate the same logic as in the actual deployment workflow
+          TARGET_ENV="${{ inputs.test_environment }}"
+          echo "🔧 Configuring AKS cluster settings for environment: $TARGET_ENV"
+          
+          # Load AKS configuration from environment variables (same as deployment workflow)
+          AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME }}"
+          AKS_RG="${{ vars.AKS_RESOURCE_GROUP }}"
+          REGION="${{ vars.AKS_REGION }}"
+          
+          echo "📋 Environment Variables Loaded from '$TARGET_ENV' environment:"
+          echo "   AKS_CLUSTER_NAME: ${AKS_CLUSTER:-'NOT_SET'}"
+          echo "   AKS_RESOURCE_GROUP: ${AKS_RG:-'NOT_SET'}"
+          echo "   AKS_REGION: ${REGION:-'NOT_SET (will use default)'}"
+          
+          # Fallback logic (same as deployment workflow)
+          if [ -z "$AKS_CLUSTER" ]; then
+            echo "⚠️ AKS_CLUSTER_NAME environment variable not set, using naming convention"
+            case "$TARGET_ENV" in
+              "dev") AKS_CLUSTER="aks-dev-cluster" ;;
+              "sqe") AKS_CLUSTER="aks-sqe-cluster" ;;
+              "ppr") AKS_CLUSTER="aks-preprod-cluster" ;;
+              "prod") AKS_CLUSTER="aks-prod-cluster" ;;
+              *) 
+                echo "❌ Unknown environment: $TARGET_ENV"
+                exit 1
+                ;;
+            esac
+          fi
+          
+          if [ -z "$AKS_RG" ]; then
+            echo "⚠️ AKS_RESOURCE_GROUP environment variable not set, using naming convention"
+            case "$TARGET_ENV" in
+              "dev") AKS_RG="rg-aks-dev" ;;
+              "sqe") AKS_RG="rg-aks-sqe" ;;
+              "ppr") AKS_RG="rg-aks-preprod" ;;
+              "prod") AKS_RG="rg-aks-prod" ;;
+              *) 
+                echo "❌ Unknown environment: $TARGET_ENV"
+                exit 1
+                ;;
+            esac
+          fi
+          
+          if [ -z "$REGION" ]; then
+            echo "⚠️ AKS_REGION environment variable not set, using default"
+            case "$TARGET_ENV" in
+              "dev"|"sqe") REGION="eastus" ;;
+              "ppr"|"prod") REGION="westus2" ;;
+              *) REGION="eastus" ;;
+            esac
+          fi
+          
+          # Determine configuration source
+          if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME }}" ]; then
+            CONFIG_SOURCE="Environment Variables"
+          else
+            CONFIG_SOURCE="Fallback Naming Convention"
+          fi
+          
+          echo ""
+          echo "✅ Final AKS Configuration (same as deployment workflow):"
+          echo "   Environment: $TARGET_ENV"
+          echo "   Cluster Name: $AKS_CLUSTER"
+          echo "   Resource Group: $AKS_RG"
+          echo "   Region: $REGION"
+          echo "   Configuration Source: $CONFIG_SOURCE"
+          echo ""
+          
+          if [ "$CONFIG_SOURCE" = "Environment Variables" ]; then
+            echo "🎯 SUCCESS: Dynamic configuration is working!"
+            echo "   ✅ Environment variables are properly configured"
+            echo "   ✅ Deployment workflow will use custom cluster names"
+          else
+            echo "⚠️ FALLBACK: Using naming convention"
+            echo "   ℹ️ Environment variables not configured - using defaults"
+            echo "   🔧 Configure environment variables for custom cluster names"
+          fi

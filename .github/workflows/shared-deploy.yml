@@ -73,8 +73,9 @@ jobs:
     outputs:
       should_deploy: ${{ steps.check.outputs.should_deploy }}
       target_environment: ${{ steps.check.outputs.target_environment }}
-      aks_cluster_name: ${{ steps.check.outputs.aks_cluster_name }}
-      aks_resource_group: ${{ steps.check.outputs.aks_resource_group }}
+      aks_cluster_name: ${{ steps.aks-config.outputs.aks_cluster_name }}
+      aks_resource_group: ${{ steps.aks-config.outputs.aks_resource_group }}
+      region: ${{ steps.aks-config.outputs.region }}
     steps:
       - name: Validate environment and branch rules
         id: check
@@ -211,15 +212,18 @@ jobs:
         echo "🔧 Configuring AKS cluster settings for environment: $TARGET_ENV"
         
         # Load AKS configuration from environment variables
-        # These variables should be set in GitHub Environment settings for each environment
+        # Each environment (dev/sqe/ppr/prod) should have these same variable names with different values:
+        # - AKS_CLUSTER_NAME: The name of the AKS cluster for this environment
+        # - AKS_RESOURCE_GROUP: The resource group containing the AKS cluster
+        # - AKS_REGION: The Azure region where the cluster is located (optional)
         AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME }}"
         AKS_RG="${{ vars.AKS_RESOURCE_GROUP }}"
         REGION="${{ vars.AKS_REGION }}"
         
-        echo "📋 Environment Variables Loaded:"
+        echo "📋 Environment Variables Loaded from '$TARGET_ENV' environment:"
         echo "   AKS_CLUSTER_NAME: ${AKS_CLUSTER:-'NOT_SET'}"
         echo "   AKS_RESOURCE_GROUP: ${AKS_RG:-'NOT_SET'}"
-        echo "   AKS_REGION: ${REGION:-'NOT_SET'}"
+        echo "   AKS_REGION: ${REGION:-'NOT_SET (will use default)'}"
         
         # Fallback to naming convention if environment variables are not set
         if [ -z "$AKS_CLUSTER" ]; then
@@ -270,12 +274,19 @@ jobs:
           exit 1
         fi
         
+        # Determine configuration source for logging
+        if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME }}" ]; then
+          CONFIG_SOURCE="Environment Variables"
+        else
+          CONFIG_SOURCE="Fallback Naming Convention"
+        fi
+        
         echo "✅ Final AKS Configuration:"
         echo "   Environment: $TARGET_ENV"
         echo "   Cluster Name: $AKS_CLUSTER"
         echo "   Resource Group: $AKS_RG"
         echo "   Region: $REGION"
-        echo "   Configuration Source: ${AKS_CLUSTER:+Environment Variables}" "${AKS_CLUSTER:-Naming Convention}"
+        echo "   Configuration Source: $CONFIG_SOURCE"
         
         # Set outputs for use in subsequent jobs
         echo "aks_cluster_name=$AKS_CLUSTER" >> $GITHUB_OUTPUT
@@ -290,31 +301,7 @@ jobs:
         echo "   - AKS resource group: $AKS_RG"
         echo "   - Region: $REGION"
           
-          # Validate that AKS cluster configuration is properly set
-          if [ "$TARGET_ENV" != "unknown" ] && [ "$TARGET_ENV" != "" ]; then
-            if [ -z "$AKS_CLUSTER" ]; then
-              echo "❌ ERROR: AKS cluster name is empty for environment $TARGET_ENV"
-              echo "Check the AKS cluster configuration in the shared workflow"
-              if [ "$SHOULD_DEPLOY" == "true" ]; then
-                exit 1
-              fi
-            fi
-            if [ -z "$AKS_RG" ]; then
-              echo "❌ ERROR: AKS resource group is empty for environment $TARGET_ENV"
-              echo "Check the AKS resource group configuration in the shared workflow"
-              if [ "$SHOULD_DEPLOY" == "true" ]; then
-                exit 1
-              fi
-            fi
-          fi
 
-          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
-          echo "target_environment=$TARGET_ENV" >> $GITHUB_OUTPUT
-          echo "aks_cluster_name=$AKS_CLUSTER" >> $GITHUB_OUTPUT
-          echo "aks_resource_group=$AKS_RG" >> $GITHUB_OUTPUT
-          echo "===================setting output values =============================="
-          cat $GITHUB_OUTPUT 
-          echo "Final decision: should_deploy=$SHOULD_DEPLOY, target_environment=$TARGET_ENV, aks_cluster_name=$AKS_CLUSTER, aks_resource_group=$AKS_RG"
 
   setup:
     runs-on: ubuntu-latest
