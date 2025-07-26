@@ -84,7 +84,7 @@ runs:
           HELM_VERSION="${VERSION}"
           echo "Using release version: ${VERSION}"
           
-        elif [[ "${{ inputs.environment }}" == "production" ]]; then
+        elif [[ "${{ inputs.environment }}" == "prod" ]]; then
           # Production from main branch - use date-based versioning
           VERSION="v1.0.0-${{ steps.date.outputs.date }}-${{ steps.sha.outputs.short_sha }}"
           IMAGE_TAG="${VERSION}"

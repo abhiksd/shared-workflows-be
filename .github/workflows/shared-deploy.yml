@@ -112,7 +112,7 @@ jobs:
           # Lower environments (dev, sqe, future envs): Use environment-specific branches
           # Upper environments: Keep existing logic (ppr=release/**, prod=tags)
           if [[ "$ENVIRONMENT" == "auto" ]]; then
-            if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]]; then
+            if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]]; then
               TARGET_ENV="dev"
             elif [[ "$GITHUB_REF" == "refs/heads/sqe" ]]; then
               TARGET_ENV="sqe"
@@ -213,7 +213,7 @@ jobs:
           
           case "$TARGET_ENV" in
             "dev")
-              if [[ "$GITHUB_REF" == "refs/heads/N630-6258_Helm_deploy" ]] || [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$GITHUB_REF" == "refs/heads/develop" ]] || [[ "$GITHUB_REF" == "refs/heads/dev" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
                 SHOULD_DEPLOY="true"
                 AKS_CLUSTER="${{ env.AKS_CLUSTER_NAME_DEV }}"
                 AKS_RG="${{ env.AKS_RESOURCE_GROUP_DEV }}"
