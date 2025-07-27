@@ -59,8 +59,8 @@ on:
         type: string
         default: ''
 
-
-    secrets: inherit
+# Note: secrets are inherited from the caller workflow via 'secrets: inherit'
+# The caller workflow (deploy.yml) handles secret inheritance to this shared workflow
 
 # Registry will be set dynamically based on environment
 # env:
