@@ -217,28 +217,52 @@ jobs:
       - name: Configure AKS Cluster Settings
         id: aks-config
         if: steps.check.outputs.should_deploy == 'true'
-        environment: ${{ steps.check.outputs.target_environment }}
         run: |
           TARGET_ENV="${{ steps.check.outputs.target_environment }}"
           echo "🔧 Configuring AKS cluster settings for environment: $TARGET_ENV"
           
-          # Load AKS configuration from environment variables
-          # Each environment (dev/sqe/ppr/prod) should have these same variable names with different values:
-          # - AKS_CLUSTER_NAME: The name of the AKS cluster for this environment
-          # - AKS_RESOURCE_GROUP: The resource group containing the AKS cluster
-          # - AKS_REGION: The Azure region where the cluster is located (optional)
-          AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME }}"
-          AKS_RG="${{ vars.AKS_RESOURCE_GROUP }}"
-          REGION="${{ vars.AKS_REGION }}"
+          # Load AKS configuration from repository variables with environment-specific naming
+          # Since environment context cannot be used at step level, we use repository variables
+          # with environment-specific names: AKS_CLUSTER_NAME_DEV, AKS_CLUSTER_NAME_SQE, etc.
           
-          echo "📋 Environment Variables Loaded from '$TARGET_ENV' environment:"
-          echo "   AKS_CLUSTER_NAME: ${AKS_CLUSTER:-'NOT_SET'}"
-          echo "   AKS_RESOURCE_GROUP: ${AKS_RG:-'NOT_SET'}"
-          echo "   AKS_REGION: ${REGION:-'NOT_SET (will use default)'}"
+          # Try to load environment-specific repository variables
+          case "$TARGET_ENV" in
+            "dev")
+              AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_DEV }}"
+              AKS_RG="${{ vars.AKS_RESOURCE_GROUP_DEV }}"
+              REGION="${{ vars.AKS_REGION_DEV }}"
+              ;;
+            "sqe")
+              AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_SQE }}"
+              AKS_RG="${{ vars.AKS_RESOURCE_GROUP_SQE }}"
+              REGION="${{ vars.AKS_REGION_SQE }}"
+              ;;
+            "ppr")
+              AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_PPR }}"
+              AKS_RG="${{ vars.AKS_RESOURCE_GROUP_PPR }}"
+              REGION="${{ vars.AKS_REGION_PPR }}"
+              ;;
+            "prod")
+              AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME_PROD }}"
+              AKS_RG="${{ vars.AKS_RESOURCE_GROUP_PROD }}"
+              REGION="${{ vars.AKS_REGION_PROD }}"
+              ;;
+            *)
+              echo "❌ Unknown environment: $TARGET_ENV"
+              AKS_CLUSTER=""
+              AKS_RG=""
+              REGION=""
+              ;;
+          esac
           
-          # Fallback to naming convention if environment variables are not set
+          echo "📋 Repository Variables Loaded for '$TARGET_ENV' environment:"
+          echo "   AKS_CLUSTER_NAME_${TARGET_ENV^^}: ${AKS_CLUSTER:-'NOT_SET'}"
+          echo "   AKS_RESOURCE_GROUP_${TARGET_ENV^^}: ${AKS_RG:-'NOT_SET'}"
+          echo "   AKS_REGION_${TARGET_ENV^^}: ${REGION:-'NOT_SET (will use default)'}"
+          
+          # Fallback to naming convention if repository variables are not set
           if [ -z "$AKS_CLUSTER" ]; then
-            echo "⚠️ AKS_CLUSTER_NAME environment variable not set, using naming convention"
+            echo "⚠️ AKS_CLUSTER_NAME_${TARGET_ENV^^} repository variable not set, using naming convention"
             case "$TARGET_ENV" in
               "dev") AKS_CLUSTER="aks-dev-cluster" ;;
               "sqe") AKS_CLUSTER="aks-sqe-cluster" ;;
@@ -252,7 +276,7 @@ jobs:
           fi
           
           if [ -z "$AKS_RG" ]; then
-            echo "⚠️ AKS_RESOURCE_GROUP environment variable not set, using naming convention"
+            echo "⚠️ AKS_RESOURCE_GROUP_${TARGET_ENV^^} repository variable not set, using naming convention"
             case "$TARGET_ENV" in
               "dev") AKS_RG="rg-aks-dev" ;;
               "sqe") AKS_RG="rg-aks-sqe" ;;
@@ -266,7 +290,7 @@ jobs:
           fi
           
           if [ -z "$REGION" ]; then
-            echo "⚠️ AKS_REGION environment variable not set, using default"
+            echo "⚠️ AKS_REGION_${TARGET_ENV^^} repository variable not set, using default"
             case "$TARGET_ENV" in
               "dev"|"sqe") REGION="eastus" ;;
               "ppr"|"prod") REGION="westus2" ;;
@@ -286,11 +310,39 @@ jobs:
           fi
           
           # Determine configuration source for logging
-          if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME }}" ]; then
-            CONFIG_SOURCE="Environment Variables"
-          else
-            CONFIG_SOURCE="Fallback Naming Convention"
-          fi
+          case "$TARGET_ENV" in
+            "dev")
+              if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME_DEV }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME_DEV }}" ]; then
+                CONFIG_SOURCE="Repository Variables"
+              else
+                CONFIG_SOURCE="Fallback Naming Convention"
+              fi
+              ;;
+            "sqe")
+              if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME_SQE }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME_SQE }}" ]; then
+                CONFIG_SOURCE="Repository Variables"
+              else
+                CONFIG_SOURCE="Fallback Naming Convention"
+              fi
+              ;;
+            "ppr")
+              if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME_PPR }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME_PPR }}" ]; then
+                CONFIG_SOURCE="Repository Variables"
+              else
+                CONFIG_SOURCE="Fallback Naming Convention"
+              fi
+              ;;
+            "prod")
+              if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME_PROD }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME_PROD }}" ]; then
+                CONFIG_SOURCE="Repository Variables"
+              else
+                CONFIG_SOURCE="Fallback Naming Convention"
+              fi
+              ;;
+            *)
+              CONFIG_SOURCE="Fallback Naming Convention"
+              ;;
+          esac
           
           echo "✅ Final AKS Configuration:"
           echo "   Environment: $TARGET_ENV"
