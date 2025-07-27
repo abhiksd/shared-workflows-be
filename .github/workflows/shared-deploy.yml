@@ -124,8 +124,8 @@ jobs:
           
           # Validate deployment rules based on target environment
           # Check if branch validation should be overridden
-                  OVERRIDE_VALIDATION="${{ inputs.override_branch_validation }}"
-        ACTOR="${{ github.actor }}"
+          OVERRIDE_VALIDATION="${{ inputs.override_branch_validation }}"
+          ACTOR="${{ github.actor }}"
           
           
           
@@ -214,103 +214,103 @@ jobs:
           echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
           echo "target_environment=$TARGET_ENV" >> $GITHUB_OUTPUT
 
-    - name: Configure AKS Cluster Settings
-      id: aks-config
-      if: steps.check.outputs.should_deploy == 'true'
-      environment: ${{ steps.check.outputs.target_environment }}
-      run: |
-        TARGET_ENV="${{ steps.check.outputs.target_environment }}"
-        echo "🔧 Configuring AKS cluster settings for environment: $TARGET_ENV"
-        
-        # Load AKS configuration from environment variables
-        # Each environment (dev/sqe/ppr/prod) should have these same variable names with different values:
-        # - AKS_CLUSTER_NAME: The name of the AKS cluster for this environment
-        # - AKS_RESOURCE_GROUP: The resource group containing the AKS cluster
-        # - AKS_REGION: The Azure region where the cluster is located (optional)
-        AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME }}"
-        AKS_RG="${{ vars.AKS_RESOURCE_GROUP }}"
-        REGION="${{ vars.AKS_REGION }}"
-        
-        echo "📋 Environment Variables Loaded from '$TARGET_ENV' environment:"
-        echo "   AKS_CLUSTER_NAME: ${AKS_CLUSTER:-'NOT_SET'}"
-        echo "   AKS_RESOURCE_GROUP: ${AKS_RG:-'NOT_SET'}"
-        echo "   AKS_REGION: ${REGION:-'NOT_SET (will use default)'}"
-        
-        # Fallback to naming convention if environment variables are not set
-        if [ -z "$AKS_CLUSTER" ]; then
-          echo "⚠️ AKS_CLUSTER_NAME environment variable not set, using naming convention"
-          case "$TARGET_ENV" in
-            "dev") AKS_CLUSTER="aks-dev-cluster" ;;
-            "sqe") AKS_CLUSTER="aks-sqe-cluster" ;;
-            "ppr") AKS_CLUSTER="aks-preprod-cluster" ;;
-            "prod") AKS_CLUSTER="aks-prod-cluster" ;;
-            *) 
-              echo "❌ Unknown environment: $TARGET_ENV"
-              exit 1
-              ;;
-          esac
-        fi
-        
-        if [ -z "$AKS_RG" ]; then
-          echo "⚠️ AKS_RESOURCE_GROUP environment variable not set, using naming convention"
-          case "$TARGET_ENV" in
-            "dev") AKS_RG="rg-aks-dev" ;;
-            "sqe") AKS_RG="rg-aks-sqe" ;;
-            "ppr") AKS_RG="rg-aks-preprod" ;;
-            "prod") AKS_RG="rg-aks-prod" ;;
-            *) 
-              echo "❌ Unknown environment: $TARGET_ENV"
-              exit 1
-              ;;
-          esac
-        fi
-        
-        if [ -z "$REGION" ]; then
-          echo "⚠️ AKS_REGION environment variable not set, using default"
-          case "$TARGET_ENV" in
-            "dev"|"sqe") REGION="eastus" ;;
-            "ppr"|"prod") REGION="westus2" ;;
-            *) REGION="eastus" ;;
-          esac
-        fi
-        
-        # Validate final configuration
-        if [ -z "$AKS_CLUSTER" ]; then
-          echo "❌ AKS cluster name could not be determined for environment: $TARGET_ENV"
-          exit 1
-        fi
-        
-        if [ -z "$AKS_RG" ]; then
-          echo "❌ AKS resource group could not be determined for environment: $TARGET_ENV"
-          exit 1
-        fi
-        
-        # Determine configuration source for logging
-        if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME }}" ]; then
-          CONFIG_SOURCE="Environment Variables"
-        else
-          CONFIG_SOURCE="Fallback Naming Convention"
-        fi
-        
-        echo "✅ Final AKS Configuration:"
-        echo "   Environment: $TARGET_ENV"
-        echo "   Cluster Name: $AKS_CLUSTER"
-        echo "   Resource Group: $AKS_RG"
-        echo "   Region: $REGION"
-        echo "   Configuration Source: $CONFIG_SOURCE"
-        
-        # Set outputs for use in subsequent jobs
-        echo "aks_cluster_name=$AKS_CLUSTER" >> $GITHUB_OUTPUT
-        echo "aks_resource_group=$AKS_RG" >> $GITHUB_OUTPUT
-        echo "region=$REGION" >> $GITHUB_OUTPUT
-        
-        # Debug output
-        echo "📊 Environment validation results:"
-        echo "   - Should deploy: ${{ steps.check.outputs.should_deploy }}"
-        echo "   - Target environment: $TARGET_ENV"
-        echo "   - AKS cluster name: $AKS_CLUSTER"
-        echo "   - AKS resource group: $AKS_RG"
-        echo "   - Region: $REGION"
+      - name: Configure AKS Cluster Settings
+        id: aks-config
+        if: steps.check.outputs.should_deploy == 'true'
+        environment: ${{ steps.check.outputs.target_environment }}
+        run: |
+          TARGET_ENV="${{ steps.check.outputs.target_environment }}"
+          echo "🔧 Configuring AKS cluster settings for environment: $TARGET_ENV"
+          
+          # Load AKS configuration from environment variables
+          # Each environment (dev/sqe/ppr/prod) should have these same variable names with different values:
+          # - AKS_CLUSTER_NAME: The name of the AKS cluster for this environment
+          # - AKS_RESOURCE_GROUP: The resource group containing the AKS cluster
+          # - AKS_REGION: The Azure region where the cluster is located (optional)
+          AKS_CLUSTER="${{ vars.AKS_CLUSTER_NAME }}"
+          AKS_RG="${{ vars.AKS_RESOURCE_GROUP }}"
+          REGION="${{ vars.AKS_REGION }}"
+          
+          echo "📋 Environment Variables Loaded from '$TARGET_ENV' environment:"
+          echo "   AKS_CLUSTER_NAME: ${AKS_CLUSTER:-'NOT_SET'}"
+          echo "   AKS_RESOURCE_GROUP: ${AKS_RG:-'NOT_SET'}"
+          echo "   AKS_REGION: ${REGION:-'NOT_SET (will use default)'}"
+          
+          # Fallback to naming convention if environment variables are not set
+          if [ -z "$AKS_CLUSTER" ]; then
+            echo "⚠️ AKS_CLUSTER_NAME environment variable not set, using naming convention"
+            case "$TARGET_ENV" in
+              "dev") AKS_CLUSTER="aks-dev-cluster" ;;
+              "sqe") AKS_CLUSTER="aks-sqe-cluster" ;;
+              "ppr") AKS_CLUSTER="aks-preprod-cluster" ;;
+              "prod") AKS_CLUSTER="aks-prod-cluster" ;;
+              *) 
+                echo "❌ Unknown environment: $TARGET_ENV"
+                exit 1
+                ;;
+            esac
+          fi
+          
+          if [ -z "$AKS_RG" ]; then
+            echo "⚠️ AKS_RESOURCE_GROUP environment variable not set, using naming convention"
+            case "$TARGET_ENV" in
+              "dev") AKS_RG="rg-aks-dev" ;;
+              "sqe") AKS_RG="rg-aks-sqe" ;;
+              "ppr") AKS_RG="rg-aks-preprod" ;;
+              "prod") AKS_RG="rg-aks-prod" ;;
+              *) 
+                echo "❌ Unknown environment: $TARGET_ENV"
+                exit 1
+                ;;
+            esac
+          fi
+          
+          if [ -z "$REGION" ]; then
+            echo "⚠️ AKS_REGION environment variable not set, using default"
+            case "$TARGET_ENV" in
+              "dev"|"sqe") REGION="eastus" ;;
+              "ppr"|"prod") REGION="westus2" ;;
+              *) REGION="eastus" ;;
+            esac
+          fi
+          
+          # Validate final configuration
+          if [ -z "$AKS_CLUSTER" ]; then
+            echo "❌ AKS cluster name could not be determined for environment: $TARGET_ENV"
+            exit 1
+          fi
+          
+          if [ -z "$AKS_RG" ]; then
+            echo "❌ AKS resource group could not be determined for environment: $TARGET_ENV"
+            exit 1
+          fi
+          
+          # Determine configuration source for logging
+          if [ "$AKS_CLUSTER" = "${{ vars.AKS_CLUSTER_NAME }}" ] && [ -n "${{ vars.AKS_CLUSTER_NAME }}" ]; then
+            CONFIG_SOURCE="Environment Variables"
+          else
+            CONFIG_SOURCE="Fallback Naming Convention"
+          fi
+          
+          echo "✅ Final AKS Configuration:"
+          echo "   Environment: $TARGET_ENV"
+          echo "   Cluster Name: $AKS_CLUSTER"
+          echo "   Resource Group: $AKS_RG"
+          echo "   Region: $REGION"
+          echo "   Configuration Source: $CONFIG_SOURCE"
+          
+          # Set outputs for use in subsequent jobs
+          echo "aks_cluster_name=$AKS_CLUSTER" >> $GITHUB_OUTPUT
+          echo "aks_resource_group=$AKS_RG" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          
+          # Debug output
+          echo "📊 Environment validation results:"
+          echo "   - Should deploy: ${{ steps.check.outputs.should_deploy }}"
+          echo "   - Target environment: $TARGET_ENV"
+          echo "   - AKS cluster name: $AKS_CLUSTER"
+          echo "   - AKS resource group: $AKS_RG"
+          echo "   - Region: $REGION"
           
 
 
@@ -419,30 +419,30 @@ jobs:
           echo "   Event type: $EVENT_NAME"
           echo "   Target environment: $ENVIRONMENT"
           
-                  if [[ "$BYPASS_SONAR" == "true" ]]; then
-          echo "🚨 EMERGENCY BYPASS ACTIVATED: SonarQube scan will be bypassed"
-          echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
-          echo "   Requested by: $ACTOR"
-          echo "   Target environment: $ENVIRONMENT"
-          echo "   Reason: Emergency deployment bypass (repository configuration)"
-          echo "   ⚠️  SECURITY WARNING: Quality gate bypassed - immediate manual review required"
-          echo ""
-          echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
-          echo "   ✅ EMERGENCY_BYPASS_SONAR repository variable set to 'true'"
-          echo "   ✅ Bypass approved for emergency deployment"
-          echo ""
-          echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
-          echo "   1. Delete EMERGENCY_BYPASS_SONAR repository variable immediately after deployment"
-          echo "   2. Conduct manual security review of deployed code"
-          echo "   3. Schedule retroactive SonarQube scan"
-          echo "   4. Document emergency bypass justification"
-          echo "bypass_approved=true" >> $GITHUB_OUTPUT
-        else
-          echo "✅ Normal SonarQube scan will proceed"
-          echo "   Repository variable EMERGENCY_BYPASS_SONAR: false (default)"
-          echo "   Standard quality gate validation active"
-          echo "bypass_approved=false" >> $GITHUB_OUTPUT
-        fi
+          if [[ "$BYPASS_SONAR" == "true" ]]; then
+            echo "🚨 EMERGENCY BYPASS ACTIVATED: SonarQube scan will be bypassed"
+            echo "   Repository variable EMERGENCY_BYPASS_SONAR: true"
+            echo "   Requested by: $ACTOR"
+            echo "   Target environment: $ENVIRONMENT"
+            echo "   Reason: Emergency deployment bypass (repository configuration)"
+            echo "   ⚠️  SECURITY WARNING: Quality gate bypassed - immediate manual review required"
+            echo ""
+            echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
+            echo "   ✅ EMERGENCY_BYPASS_SONAR repository variable set to 'true'"
+            echo "   ✅ Bypass approved for emergency deployment"
+            echo ""
+            echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
+            echo "   1. Delete EMERGENCY_BYPASS_SONAR repository variable immediately after deployment"
+            echo "   2. Conduct manual security review of deployed code"
+            echo "   3. Schedule retroactive SonarQube scan"
+            echo "   4. Document emergency bypass justification"
+            echo "bypass_approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Normal SonarQube scan will proceed"
+            echo "   Repository variable EMERGENCY_BYPASS_SONAR: false (default)"
+            echo "   Standard quality gate validation active"
+            echo "bypass_approved=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: SonarQube Scan
         id: sonar
@@ -528,30 +528,30 @@ jobs:
           echo "   Event type: $EVENT_NAME"
           echo "   Target environment: $ENVIRONMENT"
           
-                  if [[ "$BYPASS_CHECKMARX" == "true" ]]; then
-          echo "🚨 EMERGENCY BYPASS ACTIVATED: Checkmarx scan will be bypassed"
-          echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
-          echo "   Requested by: $ACTOR"
-          echo "   Target environment: $ENVIRONMENT"
-          echo "   Reason: Emergency deployment bypass (repository configuration)"
-          echo "   ⚠️  SECURITY WARNING: Security scan bypassed - immediate manual review required"
-          echo ""
-          echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
-          echo "   ✅ EMERGENCY_BYPASS_CHECKMARX repository variable set to 'true'"
-          echo "   ✅ Bypass approved for emergency deployment"
-          echo ""
-          echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
-          echo "   1. Delete EMERGENCY_BYPASS_CHECKMARX repository variable immediately after deployment"
-          echo "   2. Conduct manual security review of deployed code"
-          echo "   3. Schedule retroactive Checkmarx security scan"
-          echo "   4. Document emergency bypass justification"
-          echo "bypass_approved=true" >> $GITHUB_OUTPUT
-        else
-          echo "✅ Normal Checkmarx scan will proceed"
-          echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: false (default)"
-          echo "   Standard security scan validation active"
-          echo "bypass_approved=false" >> $GITHUB_OUTPUT
-        fi
+          if [[ "$BYPASS_CHECKMARX" == "true" ]]; then
+            echo "🚨 EMERGENCY BYPASS ACTIVATED: Checkmarx scan will be bypassed"
+            echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: true"
+            echo "   Requested by: $ACTOR"
+            echo "   Target environment: $ENVIRONMENT"
+            echo "   Reason: Emergency deployment bypass (repository configuration)"
+            echo "   ⚠️  SECURITY WARNING: Security scan bypassed - immediate manual review required"
+            echo ""
+            echo "📋 EMERGENCY BYPASS CONDITIONS MET:"
+            echo "   ✅ EMERGENCY_BYPASS_CHECKMARX repository variable set to 'true'"
+            echo "   ✅ Bypass approved for emergency deployment"
+            echo ""
+            echo "⚠️  POST-DEPLOYMENT ACTIONS REQUIRED:"
+            echo "   1. Delete EMERGENCY_BYPASS_CHECKMARX repository variable immediately after deployment"
+            echo "   2. Conduct manual security review of deployed code"
+            echo "   3. Schedule retroactive Checkmarx security scan"
+            echo "   4. Document emergency bypass justification"
+            echo "bypass_approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Normal Checkmarx scan will proceed"
+            echo "   Repository variable EMERGENCY_BYPASS_CHECKMARX: false (default)"
+            echo "   Standard security scan validation active"
+            echo "bypass_approved=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Checkmarx Scan
         id: checkmarx
@@ -706,21 +706,21 @@ jobs:
           echo "🔍 What deploy job received from validate-environment:"
           echo "should_deploy: '${{ needs.validate-environment.outputs.should_deploy }}'"
           echo "target_environment: '${{ needs.validate-environment.outputs.target_environment }}'"
-                  echo "aks_cluster_name: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
-        echo "aks_resource_group: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
+          echo "aks_cluster_name: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
+          echo "aks_resource_group: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
           echo ""
           echo "🔍 Checking if values are null or empty:"
-                  if [ -z "${{ needs.validate-environment.outputs.aks_cluster_name }}" ]; then
-          echo "❌ aks_cluster_name is NULL/EMPTY in deploy job"
-        else
-          echo "✅ aks_cluster_name received: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
-        fi
-        
-        if [ -z "${{ needs.validate-environment.outputs.aks_resource_group }}" ]; then
-          echo "❌ aks_resource_group is NULL/EMPTY in deploy job"
-        else
-          echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
-        fi
+          if [ -z "${{ needs.validate-environment.outputs.aks_cluster_name }}" ]; then
+            echo "❌ aks_cluster_name is NULL/EMPTY in deploy job"
+          else
+            echo "✅ aks_cluster_name received: '${{ needs.validate-environment.outputs.aks_cluster_name }}'"
+          fi
+          
+          if [ -z "${{ needs.validate-environment.outputs.aks_resource_group }}" ]; then
+            echo "❌ aks_resource_group is NULL/EMPTY in deploy job"
+          else
+            echo "✅ aks_resource_group received: '${{ needs.validate-environment.outputs.aks_resource_group }}'"
+          fi
 
       - name: Validate Environment Secrets
         run: |
